@@ -18,6 +18,17 @@ extern bool cmdDumpSession;
 extern std::string newCfgPayload;
 extern std::string dumpSessionPayload;
 
+// Nowe flagi komend od PWA
+extern bool cmdTime;
+extern std::string timePayload;
+extern bool cmdInfo;
+extern bool cmdFormat;
+extern bool cmdCalibrate;
+extern bool cmdDumpHist;
+extern std::string dumpHistPayload;
+extern bool cmdStreamOn;
+extern bool cmdStreamOff;
+
 void bleInit();
 void bleSend(const char* msg);
 void bleSleep();

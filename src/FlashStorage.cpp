@@ -46,7 +46,7 @@ bool flashReadRecord(uint32_t addr, LogRecord* rec) {
     flashSPI.transfer((addr >> 8)  & 0xFF);
     flashSPI.transfer( addr        & 0xFF);
     
-    uint8_t* buf = (uint8_t*)rec;
+    uint8_t* buf = reinterpret_cast<uint8_t*>(rec);
     for (uint16_t i = 0; i < RECORD_SIZE; i++) {
         buf[i] = flashSPI.transfer(0);
     }
@@ -145,7 +145,7 @@ void flashWriteRecord(const LogRecord* rec) {
         flashSectorErase(flashWriteAddr); 
     }
     
-    flashPageProgram(flashWriteAddr, (const uint8_t*)rec, RECORD_SIZE);
+    flashPageProgram(flashWriteAddr, reinterpret_cast<const uint8_t*>(rec), RECORD_SIZE);
     flashWriteAddr += RECORD_SIZE;
 }
 

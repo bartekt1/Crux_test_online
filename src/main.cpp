@@ -7,6 +7,7 @@
 #include "Display.h"
 #include "BLEManager.h"
 #include <esp_sleep.h>
+#include <sys/time.h>
 
 #define BUTTON_PIN 4
 #define LONG_PRESS_MS 3000
@@ -18,9 +19,18 @@ uint32_t sysSessionId    = 0;
 bool     sysMeasuring    = false;
 bool     sysBleDebug     = false;
 
-bool          buttonPressed    = false;
-unsigned long buttonPressStart = 0;
-bool          longPressHandled = false;
+// Ukrywamy zmienne widoczne tylko w tym pliku przed linkerem (Internal Linkage)
+static bool isLiveStreaming = false;
+static bool isDumpingHist = false;
+static uint32_t dumpHistAddr = 0x1000UL;
+static uint32_t dumpHistTargetId = 0;
+
+static bool          buttonPressed    = false;
+static unsigned long buttonPressStart = 0;
+static bool          longPressHandled = false;
+
+static unsigned long ostatnie_klikniecie = 0;
+static const unsigned long czas_blokady = 300;
 
 // Funkcja usypiania
 void enterDeepSleep() {
@@ -59,23 +69,8 @@ void stopSession() {
     bleSend(buf);
 }
 
-void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    
-    loadConfig();
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-    
-    displayInit();
-    sensorsInit();
-    flashOK = flashInit();
-    bleInit();
-}
-
-void loop() {
-    uint32_t now = millis();
-
-    // ── 1. ZARZĄDZANIE KOMENDAMI BLE ──────────────────────────────────
+// Wydzielona funkcja obsługi komend BLE
+void handleBleCommands() {
     if (cmdSleep) { cmdSleep = false; enterDeepSleep(); }
     if (cmdDebug) { cmdDebug = false; sysBleDebug = !sysBleDebug; }
 
@@ -94,8 +89,12 @@ void loop() {
 
     if (cmdStatus) {
         cmdStatus = false;
-        char buf[50];
-        snprintf(buf, 50, "REC:%u SES:%u", flashRecordCount(), flashSessionRecordCount());
+        char buf[60];
+        // Pamięć Flash: całkowity rozmiar to 16MB (0x1000000). flashWriteAddr trzyma aktualny wskaźnik zapisu.
+        uint32_t freeSpace = 0x1000000UL - flashWriteAddr;
+        const char* sensStatus = (sysPressureInitialized) ? "OK" : "ERROR";
+        // Brak pinu bat. w ESP32-C3 w tym kodzie, zwracamy placeholder lub dołączysz funkcję w przyszłości
+        snprintf(buf, sizeof(buf), "BAT:N/A;MEM:%u;SENSORS:%s", freeSpace, sensStatus);
         bleSend(buf);
     }
 
@@ -117,6 +116,85 @@ void loop() {
             bleSend("CFG:SAVED");
         } else {
             bleSend("CFG:ERROR");
+        }
+    }
+
+    if (cmdTime) {
+        cmdTime = false;
+        long timestamp = 0;
+        if (sscanf(timePayload.c_str(), "TIME:%ld", &timestamp) == 1) {
+            struct timeval tv;
+            tv.tv_sec = timestamp;
+            tv.tv_usec = 0;
+            settimeofday(&tv, NULL);
+            bleSend("TIME_OK");
+        }
+    }
+
+    if (cmdInfo) {
+        cmdInfo = false;
+        char buf[50];
+        // W tej architekturze sysSessionId inkrementuje z każdą sesją
+        snprintf(buf, sizeof(buf), "INFO:SESSIONS_%uLAST%u", sysSessionId, sysSessionId);
+        bleSend(buf);
+    }
+
+    if (cmdFormat) {
+        cmdFormat = false;
+        bleSend("FORMAT:START");
+        flashChipErase();
+        
+        // Resetujemy całkowicie numerację w NVS
+        Preferences prefs;
+        prefs.begin("crux_nvs", false);
+        prefs.putUInt("last_sess_id", 0);
+        prefs.end();
+        sysSessionId = 0;
+        sysAttemptCount = 0;
+        
+        bleSend("FORMAT_OK");
+    }
+
+    if (cmdCalibrate) {
+        cmdCalibrate = false;
+        if (sysPressureInitialized) {
+            sysSessionBasePressure = filterKalman.getPressure();
+            bleSend("CALIBRATE_OK");
+        } else {
+            bleSend("CALIBRATE_ERROR");
+        }
+    }
+
+    if (cmdDumpHist) {
+        cmdDumpHist = false;
+        if (sscanf(dumpHistPayload.c_str(), "DUMP:%u", &dumpHistTargetId) == 1) {
+            isDumpingHist = true;
+            dumpHistAddr = 0x1000UL; // DATA_START dla FlashStorage (pomijamy pierwsze sektory systemowe)
+        }
+    }
+
+    // ── ASYNCHRONICZNY DUMP HISTORYCZNY (Odczyt sesji w tle) ─────────
+    if (isDumpingHist) {
+        int sentInThisLoop = 0;
+        char buf[60];
+        // Ograniczenie wysyłania do 5 powtórzeń na jeden obrót pętli uchroni Bleutooth i maszynę stanów przed zablokowaniem
+        while (sentInThisLoop < 5 && dumpHistAddr < flashWriteAddr) {
+            LogRecord rec;
+            if (flashReadRecord(dumpHistAddr, &rec)) {
+                if (rec.state != 0xFF && rec.session_id == dumpHistTargetId) {
+                    snprintf(buf, sizeof(buf), "%u,%u,%c,%d,%u,%d",
+                             rec.timestamp_s, rec.attempt_id, stateChars[rec.state],
+                             rec.dpRateX100, rec.gvX1000, rec.pressRelX10);
+                    bleSend(buf);
+                    sentInThisLoop++;
+                }
+            }
+            dumpHistAddr += RECORD_SIZE;
+        }
+
+        if (dumpHistAddr >= flashWriteAddr) {
+            isDumpingHist = false;
+            bleSend("DUMP_END");
         }
     }
 
@@ -158,6 +236,77 @@ void loop() {
         }
     }
 
+    if (cmdStreamOn) {
+        cmdStreamOn = false;
+        isLiveStreaming = true;
+        bleSend("STREAM_OK");
+    }
+
+    if (cmdStreamOff) {
+        cmdStreamOff = false;
+        isLiveStreaming = false;
+        bleSend("STREAM_STOPPED");
+    }
+}
+
+// Wydzielona funkcja obsługi przycisku
+void handleButton(uint32_t now) {
+    bool pressed = (digitalRead(BUTTON_PIN) == LOW);
+    
+    // Obsługa zmiany stanu przycisku z debouncingiem
+    if (pressed != buttonPressed && (now - ostatnie_klikniecie > czas_blokady)) {
+        ostatnie_klikniecie = now;
+        buttonPressed = pressed;
+        
+        if (buttonPressed) {
+            buttonPressStart = now;      // Rejestrujemy moment wciśnięcia
+            longPressHandled = false;
+        } else if (!longPressHandled) {  // Puszczono przycisk przed upływem 3 sekund (krótkie kliknięcie)
+            sysMeasuring = !sysMeasuring;
+            if (sysMeasuring) { Serial.println("Rozpoczęto sesję"); startSession(); }
+            else              { Serial.println("Zatrzymano sesję"); stopSession(); }
+        }
+    }
+    
+    // Obsługa długiego wciśnięcia (gdy przycisk jest wciśnięty bez przerwy przez > 3s)
+    if (buttonPressed && !longPressHandled && (now - buttonPressStart >= LONG_PRESS_MS)) {
+        longPressHandled = true;
+        Serial.println("Zasypianie urządzenia (Deep Sleep)...");
+        enterDeepSleep();
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    
+    uint32_t t = millis();
+    while (!Serial && (millis() - t < 3000)) { delay(10); }
+    
+    Serial.println("\n--- CruxTracker Starting ---");
+    
+    loadConfig();
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    Serial.println("Config loaded");
+    
+    displayInit();
+    Serial.println("Display initialized");
+
+    bool sensorsOK = sensorsInit();
+    Serial.printf("Sensors init: %s\n", sensorsOK ? "OK" : "FAIL");
+
+    flashOK = flashInit();
+    Serial.printf("Flash init: %s\n", flashOK ? "OK" : "FAIL");
+
+    bleInit();
+    Serial.println("BLE initialized. Setup complete!");
+}
+
+void loop() {
+    uint32_t now = millis();
+
+    // ── 1. ZARZĄDZANIE KOMENDAMI BLE ──────────────────────────────────
+    handleBleCommands();
+    
     // ── 2. ODCZYT SENSORÓW (25 Hz) ───────────────────────────────────
     static uint32_t lastSensorTick = 0;
     if (now - lastSensorTick >= 40) {
@@ -244,10 +393,13 @@ void loop() {
         lastUITick = now;
         displayUpdate(sysCurrentState, sysAttemptCount, sysKalmanRate, sysGVariance, sysMeasuring, deviceConnected);
 
+        // Ciągłe logowanie telemetrii do Serial Monitora, aby wiedzieć, że płytka żyje
+        Serial.printf("Stan: %c | dP: %6.2f | Wariancja G: %6.3f\n", stateChars[sysCurrentState], sysKalmanRate, sysGVariance);
+
         static int bleTick = 0;
         if (++bleTick >= 2) {
             bleTick = 0;
-            if (deviceConnected) {
+            if (deviceConnected && isLiveStreaming) {
                 char bleBuf[30];
                 char dpDisp[8];
                 dtostrf(sysKalmanRate, 5, 1, dpDisp);
@@ -259,21 +411,5 @@ void loop() {
     }
 
     // ── 5. PRZYCISK ──────────────────────────────────────────────────
-    bool pressed = (digitalRead(BUTTON_PIN) == LOW);
-    if (pressed && !buttonPressed) {
-        buttonPressed = true; 
-        buttonPressStart = now; 
-        longPressHandled = false;
-    }
-    if (pressed && buttonPressed && !longPressHandled && (now - buttonPressStart >= LONG_PRESS_MS)) {
-        longPressHandled = true;
-        enterDeepSleep();
-    }
-    if (!pressed && buttonPressed) {
-        buttonPressed = false;
-        if (!longPressHandled) {
-            if (!sysMeasuring) startSession();
-            else stopSession();
-        }
-    }
+    handleButton(now);
 }

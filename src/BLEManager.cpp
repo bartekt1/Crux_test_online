@@ -21,6 +21,17 @@ bool cmdDumpSession = false;
 std::string newCfgPayload = "";
 std::string dumpSessionPayload = "";
 
+// Nowe flagi i zmienne dla komend PWA
+bool cmdTime = false;
+std::string timePayload = "";
+bool cmdInfo = false;
+bool cmdFormat = false;
+bool cmdCalibrate = false;
+bool cmdDumpHist = false;
+std::string dumpHistPayload = "";
+bool cmdStreamOn = false;
+bool cmdStreamOff = false;
+
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) override {
         deviceConnected = true;
@@ -45,6 +56,10 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
             cmdDumpSession = true;
             dumpSessionPayload = val;
         }
+        else if (val.find("DUMP:") != std::string::npos) {
+            cmdDumpHist = true;
+            dumpHistPayload = val;
+        }
         else if (val.find("DUMP") != std::string::npos) cmdDump = true;
         else if (val.find("TEST") != std::string::npos) cmdTest = true;
         else if (val.find("DEBUG") != std::string::npos) cmdDebug = true;
@@ -54,6 +69,15 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
             cmdSetCfg = true;
             newCfgPayload = val;
         }
+        else if (val.find("TIME:") != std::string::npos) {
+            cmdTime = true;
+            timePayload = val;
+        }
+        else if (val.find("INFO") != std::string::npos) cmdInfo = true;
+        else if (val.find("FORMAT") != std::string::npos) cmdFormat = true;
+        else if (val.find("CALIBRATE") != std::string::npos) cmdCalibrate = true;
+        else if (val.find("STREAM_ON") != std::string::npos) cmdStreamOn = true;
+        else if (val.find("STREAM_OFF") != std::string::npos) cmdStreamOff = true;
     }
 };
 
