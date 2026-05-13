@@ -43,23 +43,19 @@ function AppContent() {
       <Header />
       <main className="flex-1 overflow-y-auto pb-16">
         <Suspense fallback={<LoadingSpinner fullScreen />}>
-          {!hasData ? (
-            <WelcomeScreen />
-          ) : (
-            <Routes>
-              <Route path="/" element={<Navigate to="/sessions" replace />} />
-              <Route path="/sessions" element={<SessionsScreen />} />
-              <Route path="/sessions/:id" element={<SessionDetailScreen />} />
-              <Route path="/sessions/:id/attempts/:attemptId" element={<AttemptDetailScreen />} />
-              <Route path="/live" element={<LiveScreen />} />
-              <Route path="/device" element={<DeviceScreen />} />
-              <Route path="/settings" element={<SettingsScreen />} />
-              <Route path="*" element={<Navigate to="/sessions" replace />} />
-            </Routes>
-          )}
+          <Routes>
+            <Route path="/" element={<Navigate to="/sessions" replace />} />
+            <Route path="/sessions" element={hasData ? <SessionsScreen /> : <WelcomeScreen />} />
+            <Route path="/sessions/:id" element={<SessionDetailScreen />} />
+            <Route path="/sessions/:id/attempts/:attemptId" element={<AttemptDetailScreen />} />
+            <Route path="/live" element={<LiveScreen />} />
+            <Route path="/device" element={<DeviceScreen />} />
+            <Route path="/settings" element={<SettingsScreen />} />
+            <Route path="*" element={<Navigate to="/sessions" replace />} />
+          </Routes>
         </Suspense>
       </main>
-      {hasData && <BottomNav />}
+      <BottomNav />
     </div>
   )
 }

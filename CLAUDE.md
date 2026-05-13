@@ -9,7 +9,14 @@ CruxTracker is a harness-worn climbing session tracker (open-source). It automat
 ## Repository Structure
 
 - `firmware/` — PlatformIO C++ project for WEMOS LOLIN C3 Mini (ESP32-C3)
-- `pwa/` — Progressive Web App (currently empty / under development)
+- `pwa/` — React 19 + TypeScript PWA (Vite, Tailwind CSS v4, Zustand, Dexie, Recharts)
+
+### Hardware
+
+- **BMP390** — barometric pressure sensor (I²C); provides `pressure` readings used by the Kalman filter and state machine
+- **LSM6DSOX** — 6-DoF IMU (I²C); accelerometer readings produce `sysGVariance` and `sysTotalG`
+- **U8g2 OLED** — small display showing current state, session ID, and sensor readings
+- **W25Q128** — 16 MB SPI Flash for raw record storage (no filesystem)
 
 ## Firmware Build Commands
 
@@ -32,6 +39,20 @@ pio run -e lolin_c3_mini --target upload && pio device monitor --baud 115200
 pio run -e lolin_c3_mini --target clean
 ```
 
+## PWA Commands
+
+Run from the `pwa/` directory:
+
+```bash
+npm install        # install dependencies
+npm run dev        # start Vite dev server
+npm run build      # tsc + Vite production build
+npm run lint       # ESLint
+npm run preview    # serve the production build locally
+```
+
+Web Bluetooth requires Chrome or Edge on Android/desktop — it does not work in Firefox or Safari. Test with a real device or use the seed data in `pwa/src/lib/seedData.ts`.
+
 ## Architecture
 
 ### Main Loop (firmware/src/main.cpp)
@@ -41,6 +62,8 @@ The main loop runs four interleaved tasks at different rates:
 2. **Sensor sampling** — 25 Hz (every 40 ms)
 3. **State machine + flash logging** — 10 Hz (every 100 ms)
 4. **OLED + BLE telemetry** — 4 Hz (every 250 ms)
+
+A physical button on GPIO 4 (active LOW) toggles session start/stop on short press and enters deep sleep on a 3-second hold. The device wakes from deep sleep on GPIO 4 going LOW.
 
 ### State Machine
 
@@ -69,7 +92,7 @@ Raw SPI Flash (W25Q128, 16 MB), no filesystem:
 
 ### LogRecord Format (firmware/include/CruxTypes.h)
 
-16 bytes, `__attribute__((packed, aligned(4)))`. This is a binary contract between firmware and PWA — do not change without updating both sides.
+18 bytes, `__attribute__((packed, aligned(4)))`. `RECORD_VERSION` is currently 3 (`FW_VERSION` is 7). This is a binary contract between firmware and PWA — do not change without bumping `RECORD_VERSION` and updating both sides.
 
 | Offset | Type     | Field         | Notes                          |
 |--------|----------|---------------|--------------------------------|
@@ -104,7 +127,7 @@ Commands from PWA → device (written to RX):
 | `CALIBRATE` | `CALIBRATE_OK` or `CALIBRATE_ERROR` | Reset base pressure |
 | `STREAM_ON` | `STREAM_OK` | Start live telemetry |
 | `STREAM_OFF` | `STREAM_STOPPED` | Stop live telemetry |
-| `DUMP_SESSION:<offset>,<count>` | Records + `DUMP:END` or `DUMP:NEXT:<offset>` | Paginated current session dump (max 200 records/request) |
+| `DUMP_SESSION:<offset>,<count>` | `SESSION:<total>:<id>` header + records + `DUMP:END` or `DUMP:NEXT:<offset>` | Paginated current session dump (max 200 records/request; header only sent at offset 0) |
 | `DUMP:<session_id>` | Records + `DUMP_END` | Historical session dump by ID |
 | `ERASE` | `ERASE:START` / `ERASE:DONE` | Erase all flash data |
 | `FORMAT` | `FORMAT:START` / `FORMAT_OK` | Erase flash + reset NVS session counter |
@@ -113,6 +136,12 @@ Commands from PWA → device (written to RX):
 Live telemetry format (pushed at 2 Hz when `STREAM_ON`): `<state_char> v:<gv*1000> dP:<rate>`
 
 Dump record format (CSV): `<timestamp_s>,<attempt_id>,<state_char>,<dpRateX100>,<gvX1000>,<pressRelX10>`
+
+State chars used in both live telemetry and dump records: `I`=IDLE, `R`=RESTING, `C`=CLIMBING, `D`=DESCENDING, `F`=FREEFALL.
+
+**BLE device name filter**: `CruxTracker PRO` (used in `navigator.bluetooth.requestDevice` in `bleService.ts`).
+
+**`DUMP_SESSION` vs `DUMP`**: `DUMP_SESSION:<offset>,<count>` dumps the currently-active (in-progress) session in pages; it is implemented in firmware but **not used by the PWA**. The PWA sync uses only `DUMP:<session_id>` for completed historical sessions.
 
 ### Tunable Config (NVS namespace `crux_cfg`)
 
@@ -129,6 +158,72 @@ Dump record format (CSV): `<timestamp_s>,<attempt_id>,<state_char>,<dpRateX100>,
 
 - `crux_cfg` — tunable config (see above)
 - `crux_nvs` / key `last_sess_id` — monotonically incrementing session ID (survives resets)
+
+## PWA Architecture
+
+### Layer Overview
+
+```
+Screens (React Router) → Zustand stores → Services → Dexie (IndexedDB) / BLE
+```
+
+### State Management (pwa/src/stores/)
+
+- **`bleStore`** — wraps the singleton `ble` (BleService) class; handles connect/disconnect, sync, live stream, device config/status, erase/format. Wire-in: `ble.onConnectionChange` callback updates the store.
+- **`sessionStore`** — loads and caches all sessions from IndexedDB; used by Sessions/SessionDetail screens.
+- **`themeStore`** — persists light/dark preference to localStorage (Zustand default).
+
+### Data Layer (pwa/src/lib/db.ts)
+
+Dexie `CruxDb` (IndexedDB name: `cruxtracker`), version 2:
+- `sessions` table — stores pre-computed `Session` macro stats (attempt count, climb/rest time, total meters, timestamps). Indexed on `deviceSessionId`, `syncedAt`, `startTimestamp`.
+- `records` table — stores raw `DbRecord` rows (one per LogRecord from device). Indexed on `sessionId`, `state`, `attempt_id`.
+
+Per-attempt stats (`Attempt` type) and chart data are computed on demand in `pwa/src/lib/sessionProcessor.ts`, not stored.
+
+### Sync Flow (pwa/src/services/syncService.ts)
+
+`smartSync()` runs automatically when BLE connects (`App.tsx`):
+1. Sends `TIME:<unix_ts>` to sync device clock.
+2. Sends `INFO` to get `lastSessionId`.
+3. Compares against `deviceSessionId` values already in IndexedDB.
+4. For each missing session ID, calls `DUMP:<id>` and streams records via `dumpHistoricalSession()`.
+5. Calls `computeMacroStats()` and saves session + records to IndexedDB.
+6. Empty dumps (session erased after FORMAT) are silently skipped.
+
+### BLE Service (pwa/src/services/bleService.ts)
+
+`BleService` is a plain class (singleton `ble`). It uses a publish/subscribe handler list (`dispatch`/`subscribe`/`once`) to multiplex BLE notifications to concurrent callers. All commands follow the pattern: send → await `once(predicate)` with a timeout.
+
+### Routing
+
+React Router v7. The app shows `WelcomeScreen` when `sessions.length === 0` (no data yet). Recharts-heavy screens are lazy-loaded to reduce the initial bundle.
+
+| Route | Screen |
+|-------|--------|
+| `/sessions` | `SessionsScreen` (or `WelcomeScreen` if no data) |
+| `/sessions/:id` | `SessionDetailScreen` |
+| `/sessions/:id/attempts/:attemptId` | `AttemptDetailScreen` |
+| `/live` | `LiveScreen` |
+| `/device` | `DeviceScreen` |
+| `/settings` | `SettingsScreen` |
+
+### Units and Decoding
+
+Raw integer fields from BLE/IndexedDB must be decoded before display. Helper functions live in `pwa/src/lib/bleParser.ts → decode.*`:
+- `dpRateX100 / 100` → Pa/s
+- `gvX1000 / 1000` → G-variance
+- `pressRelX10 / 10` → Pa (relative pressure)
+- Altitude: `-(pressRelX10 / 10) / 12` → meters (negative pressRel = higher altitude)
+- Speed: `-(dpRateX100 / 100) * 5` → m/min
+
+### Backup / Restore
+
+`pwa/src/lib/backup.ts` — `exportBackup()` downloads a JSON file; `importBackup(file)` merges sessions not already in IndexedDB (deduplicates by `deviceSessionId`). Format version is `1`.
+
+### UI Language
+
+All user-visible strings in the PWA are in **Polish**.
 
 ## Key Constraints
 

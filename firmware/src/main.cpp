@@ -84,6 +84,8 @@ void handleBleCommands() {
         cmdErase = false;
         bleSend("ERASE:START");
         flashChipErase();
+        // NVS session counter intentionally NOT reset — new sessions continue from
+        // the previous ID so PWA never collides with already-synced history.
         bleSend("ERASE:DONE");
     }
 
@@ -373,7 +375,12 @@ void loop() {
                 lastLoggedState = sysCurrentState;
                 
                 LogRecord rec;
-                rec.timestamp_s  = (uint32_t)(now / 1000);
+                // Use real wall-clock time if synced via TIME: command (> year 2020),
+                // otherwise fall back to millis()-from-boot so recording still works offline.
+                time_t wallClock = time(NULL);
+                rec.timestamp_s  = (wallClock > 1577836800L)
+                                   ? (uint32_t)wallClock
+                                   : (uint32_t)(now / 1000);
                 rec.session_id   = sysSessionId;
                 rec.attempt_id   = sysAttemptCount;
                 rec.state        = (uint8_t)sysCurrentState;

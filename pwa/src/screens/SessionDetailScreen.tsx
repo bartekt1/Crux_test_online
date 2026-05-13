@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip } from 'recharts'
 import { getSessionById, getRecordsForSession } from '../lib/db'
 import { buildProcessedSession, toChartData } from '../lib/sessionProcessor'
-import { formatDuration, formatElapsed, formatDate } from '../lib/format'
+import { formatDuration, formatElapsed, formatDate, sessionDisplayDate } from '../lib/format'
+import { useSessionStore } from '../stores/sessionStore'
 import { State, STATE_LABEL } from '../types'
 import type { Session, LogRecord, ProcessedSession } from '../types'
 
@@ -77,6 +78,7 @@ function StatCard({ value, label, accent }: { value: string; label: string; acce
 export default function SessionDetailScreen() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { deleteSession } = useSessionStore()
   const [session, setSession] = useState<Session | null>(null)
   const [processed, setProcessed] = useState<ProcessedSession | null>(null)
   const [loading, setLoading] = useState(true)
@@ -94,6 +96,12 @@ export default function SessionDetailScreen() {
     })()
   }, [id, navigate])
 
+  async function handleDelete() {
+    if (!confirm('Usunąć tę sesję z lokalnej bazy danych?')) return
+    await deleteSession(session!.id!)
+    navigate('/sessions', { replace: true })
+  }
+
   if (loading || !session || !processed) {
     return <div className="p-4 text-gray-400">Ładowanie...</div>
   }
@@ -105,17 +113,25 @@ export default function SessionDetailScreen() {
 
   return (
     <div className="flex flex-col gap-5 pb-6">
-      {/* Back + title */}
-      <div className="px-4 pt-4 flex items-center gap-3">
+      {/* Back + title + delete */}
+      <div className="px-4 pt-4 flex items-center justify-between">
         <button
           onClick={() => navigate(-1)}
           className="text-violet-600 dark:text-violet-400 font-medium text-sm"
         >
           ← Wróć
         </button>
-        <span className="text-xs text-gray-400 dark:text-gray-500">
-          {formatDate(new Date(session.syncedAt))}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400 dark:text-gray-500">
+            {formatDate(sessionDisplayDate(session.startTimestamp, new Date(session.syncedAt)))}
+          </span>
+          <button
+            onClick={() => void handleDelete()}
+            className="text-red-500 dark:text-red-400 text-sm font-medium"
+          >
+            Usuń
+          </button>
+        </div>
       </div>
 
       {/* Macro stats */}

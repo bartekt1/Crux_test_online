@@ -10,6 +10,12 @@ export interface SyncProgress {
   message: string
 }
 
+const ZERO_SESSION_BASE = {
+  startTimestamp: 0, endTimestamp: 0, durationS: 0,
+  attemptCount: 0, climbTimeS: 0, restTimeS: 0,
+  recordCount: 0, totalClimbMeters: 0,
+} as const
+
 function pluralSessions(n: number): string {
   if (n === 1) return 'sesję'
   if (n < 5) return 'sesje'
@@ -55,8 +61,22 @@ export async function smartSync(
     const records: LogRecord[] = []
     await ble.dumpHistoricalSession(sessionId, (r) => records.push(r))
 
-    // Empty dump = session was erased from flash after FORMAT, skip
-    if (records.length === 0) continue
+    // Empty dump — flash was erased but NVS counter kept this ID.
+    // Save a sentinel (durationS=0) so this ID is not re-fetched on future syncs.
+    // getAllSessions() filters durationS > 0, so it stays hidden in the UI.
+    if (records.length === 0) {
+      await saveSession({ ...ZERO_SESSION_BASE, deviceSessionId: sessionId, syncedAt: new Date() })
+      continue
+    }
+
+    const stats = computeMacroStats(records, sessionId)
+
+    // Trivial session: all records landed in the same second (rapid test press).
+    // Save as sentinel — hidden from UI, prevents re-fetch.
+    if (stats.durationS === 0) {
+      await saveSession({ ...stats, syncedAt: new Date() })
+      continue
+    }
 
     onProgress({
       phase: 'saving',
@@ -65,7 +85,6 @@ export async function smartSync(
       message: `Zapisywanie sesji ${sessionId} (${records.length} rekordów)...`,
     })
 
-    const stats = computeMacroStats(records, sessionId)
     const dbId = await saveSession({ ...stats, syncedAt: new Date() })
     await saveRecords(records.map((r) => ({ ...r, sessionId: dbId })))
     synced++

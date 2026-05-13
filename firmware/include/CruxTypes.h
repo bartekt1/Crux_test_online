@@ -1,8 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION     7
-#define RECORD_VERSION 3
+#define FW_VERSION     8
+#define RECORD_VERSION 4
 
 // Stany maszyny stanów
 enum State { IDLE, RESTING, CLIMBING, DESCENDING, FREEFALL };

@@ -10,11 +10,13 @@ interface BleStore {
   liveFrame: LiveFrame | null
   deviceStatus: DeviceStatus | null
   deviceConfig: DeviceConfig | null
+  lastTimeSynced: Date | null
   error: string | null
 
   connect: () => Promise<void>
   disconnect: () => void
   sync: (onDone?: () => void) => Promise<void>
+  syncTime: () => Promise<void>
   startLive: () => void
   stopLive: () => void
   loadStatus: () => Promise<void>
@@ -41,6 +43,7 @@ export const useBleStore = create<BleStore>((set, get) => {
     liveFrame: null,
     deviceStatus: null,
     deviceConfig: null,
+    lastTimeSynced: null,
     error: null,
 
     connect: async () => {
@@ -63,11 +66,21 @@ export const useBleStore = create<BleStore>((set, get) => {
       set({ isSyncing: true, syncProgress: null, error: null })
       try {
         await smartSync(ble, (p) => set({ syncProgress: p }))
+        set({ lastTimeSynced: new Date() })
         onDone?.()
       } catch (e) {
         set({ error: (e as Error).message })
       } finally {
         set({ isSyncing: false })
+      }
+    },
+
+    syncTime: async () => {
+      try {
+        await ble.syncTime()
+        set({ lastTimeSynced: new Date() })
+      } catch (e) {
+        set({ error: (e as Error).message })
       }
     },
 

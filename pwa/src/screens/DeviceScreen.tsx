@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useBleStore } from '../stores/bleStore'
 import { useSessionStore } from '../stores/sessionStore'
+import { formatDate } from '../lib/format'
 import type { DeviceConfig } from '../types'
 
 const CFG_META: Array<{ key: keyof DeviceConfig; label: string; step: string; description: string }> = [
@@ -14,10 +15,10 @@ const CFG_META: Array<{ key: keyof DeviceConfig; label: string; step: string; de
 
 export default function DeviceScreen() {
   const {
-    isConnected, isSyncing, syncProgress, deviceStatus, deviceConfig, error,
-    connect, sync, loadStatus, loadConfig, setConfig, calibrate, sleep, erase, format, clearError,
+    isConnected, isSyncing, syncProgress, deviceStatus, deviceConfig, lastTimeSynced, error,
+    connect, sync, syncTime, loadStatus, loadConfig, setConfig, calibrate, sleep, erase, format, clearError,
   } = useBleStore()
-  const { load } = useSessionStore()
+  const { load, clearAll } = useSessionStore()
 
   const [localCfg, setLocalCfg] = useState<DeviceConfig | null>(null)
   const [cfgDirty, setCfgDirty] = useState(false)
@@ -49,6 +50,12 @@ export default function DeviceScreen() {
     setTimeout(() => setCfgMsg(null), 2000)
   }
 
+  async function handleSyncTime() {
+    await syncTime()
+    setCfgMsg('Czas zsynchronizowany')
+    setTimeout(() => setCfgMsg(null), 2000)
+  }
+
   async function handleCalibrate() {
     const result = await calibrate()
     setCfgMsg(result === 'ok' ? 'Kalibracja OK' : 'Błąd kalibracji')
@@ -66,7 +73,8 @@ export default function DeviceScreen() {
     if (!confirm('FORMAT: wymaże dane Flash I zresetuje licznik sesji. Kontynuować?')) return
     clearError()
     await format()
-    setCfgMsg('Format OK')
+    await clearAll()
+    setCfgMsg('Format OK — lokalne sesje usunięte')
   }
 
   return (
@@ -100,6 +108,28 @@ export default function DeviceScreen() {
           >
             {isSyncing ? (syncProgress?.message ?? 'Synchronizacja...') : 'Synchronizuj sesje'}
           </button>
+        )}
+
+        {isConnected && (
+          <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-2xl px-4 py-3">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-gray-900 dark:text-white">Czas urządzenia</span>
+              {lastTimeSynced && (
+                <span className="text-xs text-gray-400 dark:text-gray-500">
+                  Zsynchronizowano: {formatDate(lastTimeSynced)}
+                </span>
+              )}
+              {!lastTimeSynced && (
+                <span className="text-xs text-gray-400 dark:text-gray-500">Nie zsynchronizowano</span>
+              )}
+            </div>
+            <button
+              onClick={() => void handleSyncTime()}
+              className="text-sm text-violet-600 dark:text-violet-400 font-medium"
+            >
+              Synchronizuj
+            </button>
+          </div>
         )}
       </section>
 

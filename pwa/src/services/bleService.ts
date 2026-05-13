@@ -16,6 +16,10 @@ export class BleService {
   private rxChar: BluetoothRemoteGATTCharacteristic | null = null
   private handlers: MessageHandler[] = []
   private liveUnsub: (() => void) | null = null
+  // Collects reject callbacks so they can all be fired immediately on disconnect
+  private pendingRejects = new Set<(err: Error) => void>()
+  // Sequential queue for GATT writes — Web Bluetooth disallows concurrent writeValue calls
+  private writeQueue: Promise<void> = Promise.resolve()
 
   onConnectionChange: ((connected: boolean) => void) | null = null
 
@@ -35,13 +39,34 @@ export class BleService {
     }
   }
 
-  // Wait for a single message matching predicate
+  private abortAll(err: Error): void {
+    const rejects = [...this.pendingRejects]
+    this.pendingRejects.clear()
+    for (const rej of rejects) rej(err)
+  }
+
+  // Wait for a single message matching predicate; rejects immediately on disconnect
   private once(predicate: (m: string) => boolean, timeoutMs = 5000): Promise<string> {
     return new Promise((resolve, reject) => {
       let unsub: () => void
-      const timer = setTimeout(() => { unsub(); reject(new Error('BLE timeout')) }, timeoutMs)
+
+      const rejectFn = (err: Error) => {
+        clearTimeout(timer)
+        unsub?.()
+        this.pendingRejects.delete(rejectFn)
+        reject(err)
+      }
+      this.pendingRejects.add(rejectFn)
+
+      const timer = setTimeout(() => rejectFn(new Error('BLE timeout')), timeoutMs)
+
       unsub = this.subscribe((msg) => {
-        if (predicate(msg)) { clearTimeout(timer); unsub(); resolve(msg) }
+        if (predicate(msg)) {
+          clearTimeout(timer)
+          unsub()
+          this.pendingRejects.delete(rejectFn)
+          resolve(msg)
+        }
       })
     })
   }
@@ -55,11 +80,15 @@ export class BleService {
     })
 
     device.addEventListener('gattserverdisconnected', () => {
+      const err = new Error('Połączenie utracone')
+      // Abort all pending BLE promises immediately instead of waiting for timeouts
+      this.abortAll(err)
+      this.handlers = []
+      this.liveUnsub = null
       this.server = null
       this.txChar = null
       this.rxChar = null
-      this.handlers = []
-      this.liveUnsub = null
+      this.writeQueue = Promise.resolve()
       this.onConnectionChange?.(false)
     })
 
@@ -83,54 +112,64 @@ export class BleService {
 
   async send(cmd: string): Promise<void> {
     if (!this.rxChar) throw new Error('Not connected')
-    await this.rxChar.writeValue(new TextEncoder().encode(cmd))
+    const result = this.writeQueue.then(() => {
+      if (!this.rxChar) throw new Error('Not connected')
+      return this.rxChar.writeValue(new TextEncoder().encode(cmd))
+    })
+    this.writeQueue = result.catch(() => {})
+    return result
   }
 
   // ── Commands ──────────────────────────────────────────────────────────
 
   async getInfo() {
+    const reply = this.once((m) => m.startsWith('INFO:'))
     await this.send('INFO')
-    const msg = await this.once((m) => m.startsWith('INFO:'))
-    return parseInfo(msg)
+    return parseInfo(await reply)
   }
 
   async getStatus(): Promise<DeviceStatus | null> {
+    const reply = this.once((m) => m.startsWith('BAT:'))
     await this.send('STATUS')
-    const msg = await this.once((m) => m.startsWith('BAT:'))
-    return parseStatus(msg)
+    return parseStatus(await reply)
   }
 
   async getConfig(): Promise<DeviceConfig | null> {
+    const reply = this.once((m) => m.startsWith('CFG:'))
     await this.send('GET_CFG')
-    const msg = await this.once((m) => m.startsWith('CFG:'))
-    return parseConfig(msg)
+    return parseConfig(await reply)
   }
 
   async setConfig(cfg: DeviceConfig): Promise<void> {
+    const reply = this.once((m) => m === 'CFG:SAVED' || m === 'CFG:ERROR')
     await this.send(buildSetCfg(cfg))
-    await this.once((m) => m === 'CFG:SAVED' || m === 'CFG:ERROR')
+    await reply
   }
 
   async syncTime(): Promise<void> {
     const ts = Math.floor(Date.now() / 1000)
+    const reply = this.once((m) => m === 'TIME_OK', 3000)
     await this.send(`TIME:${ts}`)
-    await this.once((m) => m === 'TIME_OK', 3000)
+    await reply
   }
 
   async calibrate(): Promise<'ok' | 'error'> {
+    const reply = this.once((m) => m.startsWith('CALIBRATE'))
     await this.send('CALIBRATE')
-    const msg = await this.once((m) => m.startsWith('CALIBRATE'))
+    const msg = await reply
     return msg === 'CALIBRATE_OK' ? 'ok' : 'error'
   }
 
   async erase(): Promise<void> {
+    const reply = this.once((m) => m === 'ERASE:DONE', 30_000)
     await this.send('ERASE')
-    await this.once((m) => m === 'ERASE:DONE', 30_000)
+    await reply
   }
 
   async format(): Promise<void> {
+    const reply = this.once((m) => m === 'FORMAT_OK', 30_000)
     await this.send('FORMAT')
-    await this.once((m) => m === 'FORMAT_OK', 30_000)
+    await reply
   }
 
   async sleep(): Promise<void> {
@@ -145,22 +184,33 @@ export class BleService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let unsub: () => void
-      const timer = setTimeout(() => {
-        unsub()
-        reject(new Error(`DUMP timeout dla sesji ${sessionId}`))
-      }, 60_000)
+
+      const rejectFn = (err: Error) => {
+        clearTimeout(timer)
+        unsub?.()
+        this.pendingRejects.delete(rejectFn)
+        reject(err)
+      }
+      this.pendingRejects.add(rejectFn)
+
+      const timer = setTimeout(
+        () => rejectFn(new Error(`DUMP timeout dla sesji ${sessionId}`)),
+        60_000,
+      )
 
       unsub = this.subscribe((msg) => {
         if (msg === 'DUMP_END') {
-          clearTimeout(timer); unsub(); resolve(); return
+          clearTimeout(timer)
+          unsub()
+          this.pendingRejects.delete(rejectFn)
+          resolve()
+          return
         }
         const rec = parseRecord(msg)
         if (rec) onRecord(rec)
       })
 
-      this.send(`DUMP:${sessionId}`).catch((e: unknown) => {
-        clearTimeout(timer); unsub(); reject(e)
-      })
+      this.send(`DUMP:${sessionId}`).catch(rejectFn)
     })
   }
 

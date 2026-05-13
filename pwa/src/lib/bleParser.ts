@@ -55,7 +55,8 @@ export function parseConfig(msg: string): DeviceConfig | null {
 
 // Live frame: "<state_char> v:<gv*1000> dP:<rate>"
 export function parseLiveFrame(msg: string, timestamp: number): LiveFrame | null {
-  const match = msg.match(/^([IRCDF])\s+v:(\d+)\s+dP:([+-]?\d+\.?\d*)/)
+  // dtostrf on the device pads with leading spaces (e.g. "  0.0"), so allow \s* after dP:
+  const match = msg.match(/^([IRCDF])\s+v:(\d+)\s+dP:\s*([+-]?\d+\.?\d*)/)
   if (!match) return null
   const state = STATE_CHAR[match[1]]
   if (state === undefined) return null
