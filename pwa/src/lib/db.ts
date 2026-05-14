@@ -56,6 +56,10 @@ export async function getSessionById(id: number): Promise<Session | undefined> {
   return db.sessions.get(id)
 }
 
+export async function getSessionByDeviceId(deviceSessionId: number): Promise<Session | undefined> {
+  return db.sessions.where('deviceSessionId').equals(deviceSessionId).first()
+}
+
 export async function getRecordsForSession(sessionId: number): Promise<DbRecord[]> {
   return db.records.where('sessionId').equals(sessionId).sortBy('timestamp_s')
 }

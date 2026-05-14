@@ -22,6 +22,7 @@ export class BleService {
   private writeQueue: Promise<void> = Promise.resolve()
 
   onConnectionChange: ((connected: boolean) => void) | null = null
+  onSessionEnd: ((recordCount: number) => void) | null = null
 
   get isConnected(): boolean {
     return this.server?.connected ?? false
@@ -29,6 +30,10 @@ export class BleService {
 
   private dispatch(msg: string): void {
     for (const h of [...this.handlers]) h(msg)
+    if (msg.startsWith('SESSION_END:')) {
+      const count = parseInt(msg.slice('SESSION_END:'.length), 10)
+      this.onSessionEnd?.(count)
+    }
   }
 
   private subscribe(fn: MessageHandler): () => void {
@@ -75,7 +80,7 @@ export class BleService {
     if (this.isConnected) this.server?.disconnect()
 
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'CruxTracker PRO' }],
+      acceptAllDevices: true,
       optionalServices: [NUS_SERVICE_UUID],
     })
 
@@ -174,6 +179,13 @@ export class BleService {
 
   async sleep(): Promise<void> {
     await this.send('SLEEP')
+  }
+
+  async toggleSession(): Promise<'started' | 'stopped'> {
+    const reply = this.once((m) => m.startsWith('SESSION_START') || m.startsWith('SESSION_END'), 5000)
+    await this.send('TEST')
+    const msg = await reply
+    return msg.startsWith('SESSION_START') ? 'started' : 'stopped'
   }
 
   // ── Session dump ──────────────────────────────────────────────────────

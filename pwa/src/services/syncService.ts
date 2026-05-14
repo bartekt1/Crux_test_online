@@ -1,6 +1,6 @@
 import type { LogRecord } from '../types'
 import { computeMacroStats } from '../lib/sessionProcessor'
-import { getSessionIds, saveSession, saveRecords } from '../lib/db'
+import { db, getSessionByDeviceId, saveSession, saveRecords, deleteSession } from '../lib/db'
 import type { BleService } from './bleService'
 
 export interface SyncProgress {
@@ -16,6 +16,10 @@ const ZERO_SESSION_BASE = {
   recordCount: 0, totalClimbMeters: 0,
 } as const
 
+// Sessions synced within this window are re-checked — they may have been
+// captured while the session was still active (auto-sync on connect).
+const RECHECK_WINDOW_MS = 24 * 60 * 60 * 1000  // 24 hours
+
 function pluralSessions(n: number): string {
   if (n === 1) return 'sesję'
   if (n < 5) return 'sesje'
@@ -26,8 +30,7 @@ export async function smartSync(
   ble: BleService,
   onProgress: (p: SyncProgress) => void,
 ): Promise<number> {
-  // Sync device clock — non-critical, ignore failure
-  await ble.syncTime().catch(() => { /* ignore */ })
+  await ble.syncTime().catch(() => { /* non-critical */ })
 
   onProgress({ phase: 'info', current: 0, total: 0, message: 'Pobieranie listy sesji...' })
 
@@ -37,10 +40,25 @@ export async function smartSync(
     return 0
   }
 
-  const existingIds = new Set(await getSessionIds())
+  // Build map: deviceSessionId → {dbId, recordCount, syncedAt}
+  const now = Date.now()
+  const storedSessions = await db.sessions.toArray()
+  const storedMap = new Map(
+    storedSessions.map((s) => [s.deviceSessionId, s])
+  )
+
   const toFetch: number[] = []
   for (let id = 1; id <= info.lastSessionId; id++) {
-    if (!existingIds.has(id)) toFetch.push(id)
+    const stored = storedMap.get(id)
+    if (!stored) {
+      toFetch.push(id)  // never synced
+      continue
+    }
+    // Re-check sessions synced recently — may have been captured mid-session
+    const syncAge = now - new Date(stored.syncedAt).getTime()
+    if (syncAge < RECHECK_WINDOW_MS) {
+      toFetch.push(id)
+    }
   }
 
   if (toFetch.length === 0) {
@@ -55,26 +73,36 @@ export async function smartSync(
       phase: 'dumping',
       current: synced,
       total: toFetch.length,
-      message: `Pobieranie sesji ${sessionId} (${synced + 1} / ${toFetch.length})...`,
+      message: `Sprawdzanie sesji ${sessionId} (${synced + 1} / ${toFetch.length})...`,
     })
 
     const records: LogRecord[] = []
     await ble.dumpHistoricalSession(sessionId, (r) => records.push(r))
 
-    // Empty dump — flash was erased but NVS counter kept this ID.
-    // Save a sentinel (durationS=0) so this ID is not re-fetched on future syncs.
-    // getAllSessions() filters durationS > 0, so it stays hidden in the UI.
+    console.log(`[SYNC] session ${sessionId}: dump returned ${records.length} records`)
+    if (records.length > 0) {
+      console.log(`[SYNC] first ts=${records[0].timestamp_s}, last ts=${records[records.length - 1].timestamp_s}, diff=${records[records.length - 1].timestamp_s - records[0].timestamp_s}s`)
+    }
+
+    const existing = await getSessionByDeviceId(sessionId)
+    console.log(`[SYNC] existing in DB: ${existing ? `id=${existing.id} recordCount=${existing.recordCount} durationS=${existing.durationS}` : 'none'}`)
+
+    // Empty dump — save sentinel so this ID is not re-fetched indefinitely
     if (records.length === 0) {
-      await saveSession({ ...ZERO_SESSION_BASE, deviceSessionId: sessionId, syncedAt: new Date() })
+      if (!existing) {
+        await saveSession({ ...ZERO_SESSION_BASE, deviceSessionId: sessionId, syncedAt: new Date() })
+      }
       continue
     }
 
+    // No new records compared to what we have → already up-to-date
+    if (existing && records.length <= existing.recordCount) continue
+
     const stats = computeMacroStats(records, sessionId)
 
-    // Trivial session: all records landed in the same second (rapid test press).
-    // Save as sentinel — hidden from UI, prevents re-fetch.
+    // Trivial session (rapid test press) → save as hidden sentinel
     if (stats.durationS === 0) {
-      await saveSession({ ...stats, syncedAt: new Date() })
+      if (!existing) await saveSession({ ...stats, syncedAt: new Date() })
       continue
     }
 
@@ -85,6 +113,10 @@ export async function smartSync(
       message: `Zapisywanie sesji ${sessionId} (${records.length} rekordów)...`,
     })
 
+    if (existing?.id !== undefined) {
+      await deleteSession(existing.id)
+    }
+
     const dbId = await saveSession({ ...stats, syncedAt: new Date() })
     await saveRecords(records.map((r) => ({ ...r, sessionId: dbId })))
     synced++
@@ -94,7 +126,9 @@ export async function smartSync(
     phase: 'done',
     current: synced,
     total: toFetch.length,
-    message: `Zsynchronizowano ${synced} ${pluralSessions(synced)}`,
+    message: synced > 0
+      ? `Zsynchronizowano ${synced} ${pluralSessions(synced)}`
+      : 'Wszystko zsynchronizowane',
   })
 
   return synced

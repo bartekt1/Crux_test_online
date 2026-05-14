@@ -30,7 +30,10 @@ static unsigned long buttonPressStart = 0;
 static bool          longPressHandled = false;
 
 static unsigned long ostatnie_klikniecie = 0;
-static const unsigned long czas_blokady = 300;
+static const unsigned long czas_blokady = 500;  // zwiększone z 300ms → mniej fałszywych wyzwoleń
+
+// Flaga resetu stanu sesji — ustawiana przez startSession(), czytana w pętli
+static bool sessionJustStarted = false;
 
 // Funkcja usypiania
 void enterDeepSleep() {
@@ -55,18 +58,32 @@ void startSession() {
     sysAttemptCount = 0;
     sysPressureInitialized = false;
     sysSessionStartAddr = flashWriteAddr;
+    sessionJustStarted = true;  // zresetuj timery logowania w pętli głównej
 
     char buf[40];
     snprintf(buf, 40, "SESSION_START:%u", sysSessionId);
     bleSend(buf);
+
+    char dbg[40];
+    snprintf(dbg, 40, "DBG:START id=%u", sysSessionId);
+    bleSend(dbg);
+    Serial.printf(">>> SESSION START id=%u\n", sysSessionId);
 }
 
 // Bezpieczne zakończenie sesji
-void stopSession() {
+void stopSession(const char* source = "unknown") {
     sysMeasuring = false;
+    uint32_t recs = flashSessionRecordCount();
+
     char buf[40];
-    snprintf(buf, 40, "SESSION_END:%u", flashSessionRecordCount());
+    snprintf(buf, 40, "SESSION_END:%u", recs);
     bleSend(buf);
+
+    char dbg[50];
+    snprintf(dbg, 50, "DBG:STOP src=%s rec=%u", source, recs);
+    bleSend(dbg);
+    Serial.printf(">>> SESSION STOP id=%u source=%s records=%u\n",
+                  sysSessionId, source, recs);
 }
 
 // Wydzielona funkcja obsługi komend BLE
@@ -77,7 +94,7 @@ void handleBleCommands() {
     if (cmdTest) {
         cmdTest = false;
         if (!sysMeasuring) startSession();
-        else stopSession();
+        else stopSession("BLE_TEST");
     }
 
     if (cmdErase) {
@@ -265,8 +282,8 @@ void handleButton(uint32_t now) {
             longPressHandled = false;
         } else if (!longPressHandled) {  // Puszczono przycisk przed upływem 3 sekund (krótkie kliknięcie)
             sysMeasuring = !sysMeasuring;
-            if (sysMeasuring) { Serial.println("Rozpoczęto sesję"); startSession(); }
-            else              { Serial.println("Zatrzymano sesję"); stopSession(); }
+            if (sysMeasuring) { startSession(); }
+            else              { stopSession("BUTTON"); }
         }
     }
     
@@ -367,6 +384,18 @@ void loop() {
             // Logowanie do flash
             static uint32_t lastFlashLog = 0;
             static State lastLoggedState = IDLE;
+
+            // Nowa sesja — wymuś natychmiastowy zapis pierwszego rekordu
+            if (sessionJustStarted) {
+                sessionJustStarted = false;
+                lastFlashLog = 0;
+                lastLoggedState = (State)255;  // wymusza stateChanged = true
+                pendingState   = IDLE;
+                confirmCounter = 0;
+                freefallCounter = 0;
+                Serial.printf(">>> SESSION RESET done, flashWriteAddr=0x%x\n", flashWriteAddr);
+            }
+
             bool stateChanged = (sysCurrentState != lastLoggedState);
             uint32_t logInterval = (sysCurrentState == RESTING || sysCurrentState == IDLE) ? 2000 : 500;
 

@@ -23,6 +23,7 @@ export default function DeviceScreen() {
   const [localCfg, setLocalCfg] = useState<DeviceConfig | null>(null)
   const [cfgDirty, setCfgDirty] = useState(false)
   const [cfgMsg, setCfgMsg] = useState<string | null>(null)
+  const [calLabel, setCalLabel] = useState('Kalibruj ciśnienie bazowe')
 
   useEffect(() => {
     if (isConnected) {
@@ -58,8 +59,8 @@ export default function DeviceScreen() {
 
   async function handleCalibrate() {
     const result = await calibrate()
-    setCfgMsg(result === 'ok' ? 'Kalibracja OK' : 'Błąd kalibracji')
-    setTimeout(() => setCfgMsg(null), 2000)
+    setCalLabel(result === 'ok' ? '✓ Kalibracja OK' : '✗ Błąd kalibracji')
+    setTimeout(() => setCalLabel('Kalibruj ciśnienie bazowe'), 2500)
   }
 
   async function handleErase() {
@@ -191,7 +192,7 @@ export default function DeviceScreen() {
               className="w-full py-3 rounded-2xl border border-gray-200 dark:border-gray-700
                 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
-              Kalibruj ciśnienie bazowe
+              {calLabel}
             </button>
             <button
               onClick={sleep}

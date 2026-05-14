@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useThemeStore } from './stores/themeStore'
 import { useSessionStore } from './stores/sessionStore'
 import { useBleStore } from './stores/bleStore'
+import { ble } from './services/bleService'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import LoadingSpinner from './components/LoadingSpinner'
@@ -34,6 +35,20 @@ function AppContent() {
     if (isConnected) void sync(() => void load())
   }, [isConnected, sync, load])
 
+  // Sync reference to avoid stale closure in the callback
+  const syncRef = useRef(sync)
+  const loadRef = useRef(load)
+  useEffect(() => { syncRef.current = sync }, [sync])
+  useEffect(() => { loadRef.current = load }, [load])
+
+  // Auto-sync when device signals SESSION_END — captures full session data
+  useEffect(() => {
+    ble.onSessionEnd = () => {
+      void syncRef.current(() => void loadRef.current())
+    }
+    return () => { ble.onSessionEnd = null }
+  }, [])
+
   if (isLoading) return null
 
   const hasData = sessions.length > 0
@@ -44,14 +59,14 @@ function AppContent() {
       <main className="flex-1 overflow-y-auto pb-16">
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           <Routes>
-            <Route path="/" element={<Navigate to="/sessions" replace />} />
-            <Route path="/sessions" element={hasData ? <SessionsScreen /> : <WelcomeScreen />} />
+            <Route path="/" element={<WelcomeScreen />} />
+            <Route path="/sessions" element={hasData ? <SessionsScreen /> : <Navigate to="/" replace />} />
             <Route path="/sessions/:id" element={<SessionDetailScreen />} />
             <Route path="/sessions/:id/attempts/:attemptId" element={<AttemptDetailScreen />} />
             <Route path="/live" element={<LiveScreen />} />
             <Route path="/device" element={<DeviceScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
-            <Route path="*" element={<Navigate to="/sessions" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </main>

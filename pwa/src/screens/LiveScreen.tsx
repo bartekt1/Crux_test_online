@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { LineChart, Line, YAxis, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useBleStore } from '../stores/bleStore'
 import { STATE_LABEL, State } from '../types'
@@ -12,12 +12,16 @@ const STATE_STYLE: Record<number, { bg: string; text: string }> = {
   [State.FREEFALL]:   { bg: 'bg-red-50 dark:bg-red-900/30',        text: 'text-red-600 dark:text-red-400' },
 }
 
-const MAX_FRAMES = 60
+const MAX_FRAMES = 120  // 60 seconds at 2 Hz
+// Frames arrive at 2 Hz → each frame ≈ 0.5 s of data
+const FRAME_DT = 0.5
+const PA_PER_METER = 12
 
 export default function LiveScreen() {
-  const { isConnected, liveFrame, startLive, stopLive, connect } = useBleStore()
+  const { isConnected, liveFrame, isDeviceRecording, startLive, stopLive, connect, toggleDeviceSession } = useBleStore()
   const [isStreaming, setIsStreaming] = useState(false)
   const [frames, setFrames] = useState<LiveFrame[]>([])
+  const [sessionPending, setSessionPending] = useState(false)
 
   useEffect(() => {
     if (liveFrame) {
@@ -29,10 +33,35 @@ export default function LiveScreen() {
     return () => stopLive()
   }, [stopLive])
 
+  // Cumulative altitude computed from all live frames
+  const liveStats = useMemo(() => {
+    let cumAlt = 0
+    let totalUp = 0
+    let totalDown = 0
+    const altData: Array<{ i: number; alt: number }> = []
+
+    for (let idx = 0; idx < frames.length; idx++) {
+      // negative dpRate = ascending (pressure drops) → positive altitude change
+      const deltaAlt = -frames[idx].dpRate * FRAME_DT / PA_PER_METER
+      cumAlt += deltaAlt
+      if (deltaAlt > 0.05) totalUp += deltaAlt
+      else if (deltaAlt < -0.05) totalDown += Math.abs(deltaAlt)
+      altData.push({ i: idx, alt: Math.round(cumAlt * 10) / 10 })
+    }
+
+    return {
+      altData,
+      totalUp: totalUp.toFixed(1),
+      totalDown: totalDown.toFixed(1),
+      currentAlt: cumAlt.toFixed(1),
+    }
+  }, [frames])
+
   function toggleStream() {
     if (isStreaming) {
       stopLive()
       setIsStreaming(false)
+      setFrames([])
     } else {
       startLive()
       setIsStreaming(true)
@@ -40,10 +69,23 @@ export default function LiveScreen() {
     }
   }
 
+  async function handleToggleSession() {
+    setSessionPending(true)
+    await toggleDeviceSession()
+    setSessionPending(false)
+  }
+
+  const sessionButtonLabel = sessionPending
+    ? 'Oczekiwanie…'
+    : isDeviceRecording === true
+      ? '■ Zakończ sesję na urządzeniu'
+      : isDeviceRecording === false
+        ? '▶ Uruchom sesję na urządzeniu'
+        : '▶ / ■  Sesja na urządzeniu'
+
   const current = frames.at(-1) ?? liveFrame
   const state = current?.state ?? State.IDLE
   const style = STATE_STYLE[state]
-  const chartData = frames.map((f, i) => ({ i, dp: f.dpRate }))
   const waitingForData = isStreaming && frames.length === 0
 
   if (!isConnected) {
@@ -63,23 +105,39 @@ export default function LiveScreen() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-4">
+    <div className="flex flex-col gap-4 p-4 pb-8">
       <h2 className="text-xl font-bold text-gray-900 dark:text-white">Live</h2>
 
       {/* State indicator */}
-      <div className={`${style.bg} rounded-3xl px-6 py-8 flex flex-col items-center gap-2 transition-colors`}>
+      <div className={`${style.bg} rounded-3xl px-6 py-6 flex flex-col items-center gap-3 transition-colors`}>
         <span className={`text-4xl font-black tracking-tight ${style.text}`}>
           {STATE_LABEL[state]}
         </span>
-        <span className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
-          {current ? `${current.dpRate > 0 ? '+' : ''}${current.dpRate.toFixed(1)}` : '—'} Pa/s
-        </span>
+
+        {/* Altitude stats */}
+        <div className="flex gap-6">
+          <div className="flex flex-col items-center">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
+              {isStreaming ? `+${liveStats.totalUp} m` : '— m'}
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">w górę</span>
+          </div>
+          <div className="w-px bg-gray-200 dark:bg-gray-600" />
+          <div className="flex flex-col items-center">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">
+              {isStreaming ? `-${liveStats.totalDown} m` : '— m'}
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">w dół</span>
+          </div>
+        </div>
+
+        {/* G-variance — movement intensity */}
         <span className="text-sm text-gray-500 dark:text-gray-400 tabular-nums">
-          G-var: {current ? (current.gvRaw / 1000).toFixed(3) : '—'}
+          Dynamika ruchu: {current ? (current.gvRaw / 1000).toFixed(3) : '—'} σG
         </span>
       </div>
 
-      {/* Chart or waiting state */}
+      {/* Altitude chart or waiting indicator */}
       {waitingForData ? (
         <div className="flex flex-col items-center gap-2 py-6">
           <div className="flex gap-1.5">
@@ -91,19 +149,19 @@ export default function LiveScreen() {
               />
             ))}
           </div>
-          <p className="text-sm text-gray-400 dark:text-gray-500">Oczekiwanie na dane z urządzenia…</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">Oczekiwanie na dane…</p>
         </div>
-      ) : frames.length > 2 ? (
+      ) : liveStats.altData.length > 2 ? (
         <div>
           <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
-            dP — ostatnie {frames.length} pomiarów
+            Zmiana wysokości (m) — ostatnie {frames.length} pomiarów
           </p>
           <ResponsiveContainer width="100%" height={80}>
-            <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 0, left: -30 }}>
-              <YAxis tick={{ fontSize: 9 }} stroke="#9ca3af" />
+            <LineChart data={liveStats.altData} margin={{ top: 2, right: 2, bottom: 0, left: -28 }}>
+              <YAxis tick={{ fontSize: 9 }} stroke="#9ca3af" unit="m" />
               <ReferenceLine y={0} stroke="#e5e7eb" />
               <Line
-                type="monotone" dataKey="dp"
+                type="monotone" dataKey="alt"
                 stroke="#7c3aed" strokeWidth={2}
                 dot={false} isAnimationActive={false}
               />
@@ -112,7 +170,7 @@ export default function LiveScreen() {
         </div>
       ) : null}
 
-      {/* Toggle button */}
+      {/* Stream toggle */}
       <button
         onClick={toggleStream}
         className={`w-full py-3.5 rounded-2xl font-semibold text-white transition-colors ${
@@ -120,6 +178,19 @@ export default function LiveScreen() {
         }`}
       >
         {isStreaming ? 'Zatrzymaj podgląd' : 'Rozpocznij podgląd live'}
+      </button>
+
+      {/* Session toggle on device */}
+      <button
+        onClick={() => void handleToggleSession()}
+        disabled={sessionPending}
+        className={`w-full py-3 rounded-2xl font-medium transition-colors disabled:opacity-50 ${
+          isDeviceRecording
+            ? 'border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
+            : 'border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+        }`}
+      >
+        {sessionButtonLabel}
       </button>
 
       {!isStreaming && (

@@ -5,7 +5,7 @@ import { exportBackup, importBackup } from '../lib/backup'
 
 export default function SettingsScreen() {
   const { theme, toggle } = useThemeStore()
-  const { load } = useSessionStore()
+  const { load, clearAll } = useSessionStore()
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -18,6 +18,11 @@ export default function SettingsScreen() {
     } catch (err) {
       alert(`Błąd importu: ${(err as Error).message}`)
     }
+  }
+
+  async function handleClearAll() {
+    if (!confirm('Usunąć wszystkie lokalne dane sesji? Danych na urządzeniu to nie dotyczy.')) return
+    await clearAll()
   }
 
   return (
@@ -69,6 +74,23 @@ export default function SettingsScreen() {
             onChange={(e) => void handleImport(e)}
           />
         </div>
+      </section>
+
+      {/* Reset */}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          Reset
+        </h3>
+        <button
+          onClick={() => void handleClearAll()}
+          className="w-full py-3 rounded-2xl border border-red-200 dark:border-red-900
+            text-red-600 dark:text-red-400 font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+        >
+          Wyczyść wszystkie dane lokalne
+        </button>
+        <p className="text-xs text-gray-400 dark:text-gray-500 px-1">
+          Usuwa sesje z tej przeglądarki. Danych na urządzeniu nie dotyczy.
+        </p>
       </section>
     </div>
   )

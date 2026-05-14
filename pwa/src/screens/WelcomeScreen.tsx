@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useBleStore } from '../stores/bleStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { MountainIcon } from '../components/Icons'
@@ -6,6 +7,7 @@ import { importBackup } from '../lib/backup'
 import { seedDemoData } from '../lib/seedData'
 
 export default function WelcomeScreen() {
+  const navigate = useNavigate()
   const { isConnected, isSyncing, syncProgress, error, connect, sync, clearError } = useBleStore()
   const { load } = useSessionStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -22,6 +24,7 @@ export default function WelcomeScreen() {
     try {
       await seedDemoData()
       await load()
+      navigate('/sessions')
     } finally {
       setIsSeeding(false)
     }
@@ -34,6 +37,7 @@ export default function WelcomeScreen() {
       const result = await importBackup(file)
       await load()
       console.info(`Zaimportowano ${result.sessions} sesji`)
+      navigate('/sessions')
     } catch (err) {
       console.error('Import failed', err)
     }

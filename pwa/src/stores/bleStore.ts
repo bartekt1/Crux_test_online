@@ -11,6 +11,7 @@ interface BleStore {
   deviceStatus: DeviceStatus | null
   deviceConfig: DeviceConfig | null
   lastTimeSynced: Date | null
+  isDeviceRecording: boolean | null  // null = unknown (not yet queried)
   error: string | null
 
   connect: () => Promise<void>
@@ -23,6 +24,7 @@ interface BleStore {
   loadConfig: () => Promise<void>
   setConfig: (cfg: DeviceConfig) => Promise<void>
   calibrate: () => Promise<'ok' | 'error'>
+  toggleDeviceSession: () => Promise<'started' | 'stopped'>
   sleep: () => void
   erase: () => Promise<void>
   format: () => Promise<void>
@@ -33,7 +35,7 @@ export const useBleStore = create<BleStore>((set, get) => {
   // Wire BLE service connection changes into store
   ble.onConnectionChange = (connected) => {
     set({ isConnected: connected })
-    if (!connected) set({ liveFrame: null, deviceStatus: null, syncProgress: null })
+    if (!connected) set({ liveFrame: null, deviceStatus: null, syncProgress: null, isDeviceRecording: null })
   }
 
   return {
@@ -44,6 +46,7 @@ export const useBleStore = create<BleStore>((set, get) => {
     deviceStatus: null,
     deviceConfig: null,
     lastTimeSynced: null,
+    isDeviceRecording: null,
     error: null,
 
     connect: async () => {
@@ -121,6 +124,17 @@ export const useBleStore = create<BleStore>((set, get) => {
     },
 
     calibrate: () => ble.calibrate(),
+
+    toggleDeviceSession: async () => {
+      try {
+        const result = await ble.toggleSession()
+        set({ isDeviceRecording: result === 'started' })
+        return result
+      } catch (e) {
+        set({ error: (e as Error).message })
+        return 'stopped'
+      }
+    },
 
     sleep: () => {
       ble.sleep().catch(() => { /* device disconnects immediately */ })

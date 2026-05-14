@@ -143,6 +143,13 @@ export default function SessionDetailScreen() {
         <StatCard value={formatDuration(session.climbTimeS)} label="Wspinanie" accent />
         <StatCard value={formatDuration(session.restTimeS)} label="Odpoczynek" />
       </div>
+      {/* Debug info — timestamps & record count */}
+      <div className="px-4 text-xs text-gray-400 dark:text-gray-500 flex flex-col gap-0.5">
+        <span>Rekordów w bazie: {session.recordCount}</span>
+        <span>Start ts: {session.startTimestamp}</span>
+        <span>End ts: {session.endTimestamp}</span>
+        <span>Diff: {session.endTimestamp - session.startTimestamp}s</span>
+      </div>
 
       {/* Altitude profile chart */}
       <div className="px-4">

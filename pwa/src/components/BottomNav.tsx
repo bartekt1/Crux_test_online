@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom'
-import { ListIcon, ActivityIcon, BluetoothIcon, SettingsIcon } from './Icons'
+import { HomeIcon, ListIcon, ActivityIcon, BluetoothIcon, SettingsIcon } from './Icons'
 
 const tabs = [
-  { path: '/sessions',  label: 'Sesje',      Icon: ListIcon },
+  { path: '/',          label: 'Start',       Icon: HomeIcon },
+  { path: '/sessions',  label: 'Sesje',       Icon: ListIcon },
   { path: '/live',      label: 'Live',        Icon: ActivityIcon },
   { path: '/device',    label: 'Urządzenie',  Icon: BluetoothIcon },
   { path: '/settings',  label: 'Ustawienia',  Icon: SettingsIcon },
@@ -15,6 +16,7 @@ export default function BottomNav() {
         <NavLink
           key={path}
           to={path}
+          end={path === '/'}  // exact match only for home
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center justify-center gap-0.5 text-xs font-medium transition-colors ${
               isActive
