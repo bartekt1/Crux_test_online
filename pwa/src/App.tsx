@@ -96,9 +96,11 @@ function AppContent() {
 }
 
 export default function App() {
+  // BASE_URL = '/' locally, '/Crux_test_online/' on GitHub Pages
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <AppContent />
       </BrowserRouter>
     </ErrorBoundary>
