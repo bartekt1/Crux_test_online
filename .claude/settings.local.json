@@ -5,7 +5,8 @@
       "Bash(npm run *)",
       "Bash(pip show *)",
       "Bash(pip install *)",
-      "Bash(pio run *)"
+      "Bash(pio run *)",
+      "Bash(grep -E '\\\\.\\(cpp|h\\)$')"
     ]
   }
 }
