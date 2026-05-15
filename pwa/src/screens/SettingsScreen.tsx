@@ -107,7 +107,8 @@ export default function SettingsScreen() {
     try {
       const result = await importBackup(file)
       await load()
-      alert(`Zaimportowano ${result.sessions} sesji, ${result.records} rekordów`)
+      const parts = [`${result.sessions} sesji`, `${result.records} rekordów`, `${result.routes} tras`]
+      alert(`Zaimportowano: ${parts.join(', ')}`)
     } catch (err) {
       alert(`Błąd importu: ${(err as Error).message}`)
     }

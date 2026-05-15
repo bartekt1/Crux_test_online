@@ -139,4 +139,5 @@ export interface BackupFile {
   exportedAt: string
   sessions: Session[]
   records: DbRecord[]
+  routes?: Route[]
 }
