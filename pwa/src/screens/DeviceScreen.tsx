@@ -4,13 +4,31 @@ import { useSessionStore } from '../stores/sessionStore'
 import { formatDate } from '../lib/format'
 import type { DeviceConfig } from '../types'
 
-const CFG_META: Array<{ key: keyof DeviceConfig; label: string; step: string; description: string }> = [
-  { key: 'pClimb',  label: 'pClimb',  step: '0.1',   description: 'Min |dP| do CLIMBING (Pa/s)' },
-  { key: 'pDesc',   label: 'pDesc',   step: '0.1',   description: 'Min dP do DESCENDING (Pa/s)' },
-  { key: 'gAct',    label: 'gAct',    step: '0.001', description: 'Próg wariancji G — "aktywny"' },
-  { key: 'gStill',  label: 'gStill',  step: '0.001', description: 'Próg wariancji G — "w spoczynku"' },
-  { key: 'gFall',   label: 'gFall',   step: '0.05',  description: 'Próg |G| do FREEFALL' },
-  { key: 'confirm', label: 'confirm', step: '1',     description: 'Debounce (ticki 100ms)' },
+const CFG_META: Array<{ key: keyof DeviceConfig; label: string; step: string; hint: string }> = [
+  {
+    key: 'pClimb', label: 'Próg wspinania', step: '0.1',
+    hint: 'Minimalna prędkość zmian ciśnienia (Pa/s) do wykrycia wspinania. Zwiększ jeśli urządzenie błędnie wykrywa wspinanie podczas chodzenia lub pracy klimatyzacji. Zmniejsz jeśli wspinanie na wolnych trasach nie jest wykrywane. Domyślnie: 5.0',
+  },
+  {
+    key: 'pDesc', label: 'Próg zjazdu', step: '0.1',
+    hint: 'Minimalna prędkość zmian ciśnienia (Pa/s) do wykrycia zjazdu na linie. Działa symetrycznie do progu wspinania. Domyślnie: 1.5',
+  },
+  {
+    key: 'gAct', label: 'Czułość ruchu', step: '0.001',
+    hint: 'Próg wariancji akcelerometru powyżej którego urządzenie uznaje ciało za aktywne. Gdy ciało jest nieruchome, zmiany ciśnienia są ignorowane (np. od wiatru czy klimatyzacji). Zmniejsz jeśli wspinanie jest pomijane. Domyślnie: 0.003',
+  },
+  {
+    key: 'gStill', label: 'Próg bezruchu', step: '0.001',
+    hint: 'Wariancja akcelerometru poniżej której urządzenie przechodzi w stan ODPOCZYNEK. Powinna być niższa od czułości ruchu. Zmniejsz jeśli urządzenie nie wraca do odpoczynku między próbami. Domyślnie: 0.001',
+  },
+  {
+    key: 'gFall', label: 'Swobodny spadek', step: '0.05',
+    hint: 'Próg łącznego przyspieszenia (×g) do wykrycia swobodnego spadku lub lotu. Wartość bliska 0 oznacza brak grawitacji. Nie zmieniaj bez wyraźnej potrzeby. Domyślnie: 0.3',
+  },
+  {
+    key: 'confirm', label: 'Stabilizacja stanu', step: '1',
+    hint: 'Liczba kolejnych taktów (×100ms) potwierdzających nowy stan zanim nastąpi zmiana. Wyższa wartość eliminuje chwilowe wahania, ale spowalnia reakcję urządzenia. Domyślnie: 4 (= 400ms)',
+  },
 ]
 
 export default function DeviceScreen() {
@@ -24,6 +42,7 @@ export default function DeviceScreen() {
   const [cfgDirty, setCfgDirty] = useState(false)
   const [cfgMsg, setCfgMsg] = useState<string | null>(null)
   const [calLabel, setCalLabel] = useState('Kalibruj ciśnienie bazowe')
+  const [expandedHint, setExpandedHint] = useState<keyof DeviceConfig | null>(null)
 
   useEffect(() => {
     if (isConnected) {
@@ -151,20 +170,37 @@ export default function DeviceScreen() {
         <section className="flex flex-col gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Konfiguracja</h3>
           <div className="bg-gray-50 dark:bg-gray-800 rounded-2xl px-4 py-3 flex flex-col gap-3">
-            {CFG_META.map(({ key, label, step, description }) => (
-              <div key={key} className="flex items-center justify-between gap-3">
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">{label}</span>
-                  <span className="text-xs text-gray-400">{description}</span>
+            {CFG_META.map(({ key, label, step, hint }) => (
+              <div key={key} className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">{label}</span>
+                    <button
+                      onClick={() => setExpandedHint(expandedHint === key ? null : key)}
+                      className={`w-4 h-4 rounded-full text-[10px] font-bold border flex items-center justify-center transition-colors ${
+                        expandedHint === key
+                          ? 'border-violet-500 text-violet-500'
+                          : 'border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
+                      }`}
+                      aria-label="Więcej informacji"
+                    >
+                      i
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    step={step}
+                    value={localCfg[key]}
+                    onChange={(e) => updateField(key, e.target.value)}
+                    className="w-24 text-right bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700
+                      rounded-lg px-2 py-1 text-sm text-gray-900 dark:text-white"
+                  />
                 </div>
-                <input
-                  type="number"
-                  step={step}
-                  value={localCfg[key]}
-                  onChange={(e) => updateField(key, e.target.value)}
-                  className="w-24 text-right bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700
-                    rounded-lg px-2 py-1 text-sm text-gray-900 dark:text-white"
-                />
+                {expandedHint === key && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed px-1 pb-1 border-l-2 border-violet-300 dark:border-violet-700 pl-2">
+                    {hint}
+                  </p>
+                )}
               </div>
             ))}
             <div className="flex items-center gap-3 pt-1">

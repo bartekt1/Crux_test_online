@@ -17,6 +17,7 @@ const SessionDetailScreen  = lazy(() => import('./screens/SessionDetailScreen'))
 const AttemptDetailScreen  = lazy(() => import('./screens/AttemptDetailScreen'))
 const LiveScreen           = lazy(() => import('./screens/LiveScreen'))
 const DeviceScreen         = lazy(() => import('./screens/DeviceScreen'))
+const StatsScreen          = lazy(() => import('./screens/StatsScreen'))
 
 function AppContent() {
   const { theme } = useThemeStore()
@@ -70,6 +71,7 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<WelcomeScreen />} />
             <Route path="/sessions" element={hasData ? <SessionsScreen /> : <Navigate to="/" replace />} />
+            <Route path="/stats" element={<StatsScreen />} />
             <Route path="/sessions/:id" element={<SessionDetailScreen />} />
             <Route path="/sessions/:id/attempts/:attemptId" element={<AttemptDetailScreen />} />
             <Route path="/live" element={<LiveScreen />} />
