@@ -24,6 +24,9 @@ static bool isLiveStreaming = false;
 static bool isDumpingHist = false;
 static uint32_t dumpHistAddr = 0x1000UL;
 static uint32_t dumpHistTargetId = 0;
+static uint32_t dumpHistSentTotal = 0;
+static uint32_t dumpHistScannedTotal = 0;
+static int dumpHistMismatchLog = 0;
 
 static bool          buttonPressed    = false;
 static unsigned long buttonPressStart = 0;
@@ -162,15 +165,15 @@ void handleBleCommands() {
         cmdFormat = false;
         bleSend("FORMAT:START");
         flashChipErase();
-        
-        // Resetujemy całkowicie numerację w NVS
+
         Preferences prefs;
         prefs.begin("crux_nvs", false);
         prefs.putUInt("last_sess_id", 0);
         prefs.end();
         sysSessionId = 0;
         sysAttemptCount = 0;
-        
+        Serial.println("[FORMAT] Flash + NVS wyczyszczone. Nastepna sesja bedzie id=1");
+
         bleSend("FORMAT_OK");
     }
 
@@ -187,8 +190,12 @@ void handleBleCommands() {
     if (cmdDumpHist) {
         cmdDumpHist = false;
         if (sscanf(dumpHistPayload.c_str(), "DUMP:%u", &dumpHistTargetId) == 1) {
+            Serial.printf("[DUMP_START] targetId=%u flashWriteAddr=0x%x RECORD_SIZE=%u\n",
+                          dumpHistTargetId, flashWriteAddr, (unsigned)RECORD_SIZE);
             isDumpingHist = true;
-            dumpHistAddr = 0x1000UL; // DATA_START dla FlashStorage (pomijamy pierwsze sektory systemowe)
+            dumpHistAddr = 0x1000UL;
+            dumpHistSentTotal = 0;
+            dumpHistScannedTotal = 0;
         }
     }
 
@@ -196,23 +203,31 @@ void handleBleCommands() {
     if (isDumpingHist) {
         int sentInThisLoop = 0;
         char buf[60];
-        // Ograniczenie wysyłania do 5 powtórzeń na jeden obrót pętli uchroni Bleutooth i maszynę stanów przed zablokowaniem
         while (sentInThisLoop < 5 && dumpHistAddr < flashWriteAddr) {
             LogRecord rec;
             if (flashReadRecord(dumpHistAddr, &rec)) {
+                dumpHistScannedTotal++;
                 if (rec.state != 0xFF && rec.session_id == dumpHistTargetId) {
                     snprintf(buf, sizeof(buf), "%u,%u,%c,%d,%u,%d",
                              rec.timestamp_s, rec.attempt_id, stateChars[rec.state],
                              rec.dpRateX100, rec.gvX1000, rec.pressRelX10);
                     bleSend(buf);
                     sentInThisLoop++;
+                    dumpHistSentTotal++;
+                } else if (rec.state != 0xFF && dumpHistMismatchLog < 20) {
+                    Serial.printf("[DUMP_MISMATCH] addr=0x%x sid=%u (want %u) state=%u\n",
+                                  dumpHistAddr, rec.session_id, dumpHistTargetId, rec.state);
+                    dumpHistMismatchLog++;
                 }
             }
-            dumpHistAddr += RECORD_SIZE;
+            dumpHistAddr = flashNextAddr(dumpHistAddr);
         }
 
         if (dumpHistAddr >= flashWriteAddr) {
+            Serial.printf("[DUMP_END] sent=%u scanned=%u addr=0x%x flashWriteAddr=0x%x\n",
+                          dumpHistSentTotal, dumpHistScannedTotal, dumpHistAddr, flashWriteAddr);
             isDumpingHist = false;
+            dumpHistMismatchLog = 0;
             bleSend("DUMP_END");
         }
     }
@@ -305,7 +320,14 @@ void setup() {
     
     loadConfig();
     pinMode(BUTTON_PIN, INPUT_PULLUP);
-    Serial.println("Config loaded");
+
+    {
+        Preferences prefs;
+        prefs.begin("crux_nvs", true);
+        sysSessionId = prefs.getUInt("last_sess_id", 0);
+        prefs.end();
+    }
+    Serial.printf("Config loaded, last session id=%u\n", sysSessionId);
     
     displayInit();
     Serial.println("Display initialized");

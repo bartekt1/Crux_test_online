@@ -9,6 +9,7 @@ extern bool flashOK;
 bool flashInit();
 void flashWriteRecord(const LogRecord* rec);
 bool flashReadRecord(uint32_t addr, LogRecord* rec);
+uint32_t flashNextAddr(uint32_t addr);
 uint32_t flashRecordCount();
 uint32_t flashSessionRecordCount();
 void flashChipErase();

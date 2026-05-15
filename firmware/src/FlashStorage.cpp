@@ -89,23 +89,41 @@ void flashChipErase() {
     sysSessionStartAddr = DATA_START;
 }
 
+// Returns the next valid record address after addr, mirroring the write-side page-skip logic.
+uint32_t flashNextAddr(uint32_t addr) {
+    addr += RECORD_SIZE;
+    if ((addr % PAGE_SIZE) + RECORD_SIZE > PAGE_SIZE) {
+        addr = (addr / PAGE_SIZE + 1) * PAGE_SIZE;
+    }
+    return addr;
+}
+
+// Converts a linear record index to a flash address, accounting for page-boundary gaps.
+static uint32_t recordIndexToAddr(uint32_t idx) {
+    const uint32_t recsPerPage = PAGE_SIZE / RECORD_SIZE;
+    return DATA_START + (idx / recsPerPage) * PAGE_SIZE + (idx % recsPerPage) * RECORD_SIZE;
+}
+
 uint32_t flashFindWritePos() {
-    uint32_t low = DATA_START, high = FLASH_SIZE;
+    const uint32_t recsPerPage = PAGE_SIZE / RECORD_SIZE;
+    const uint32_t maxRecords  = ((FLASH_SIZE - DATA_START) / PAGE_SIZE) * recsPerPage;
+
+    uint32_t low = 0, high = maxRecords;
     while (low < high) {
-        uint32_t mid = low + ((high - low) / 2);
-        mid = mid - ((mid - DATA_START) % RECORD_SIZE);
-        
+        uint32_t mid  = low + (high - low) / 2;
+        uint32_t addr = recordIndexToAddr(mid);
+
         digitalWrite(FLASH_CS, LOW);
         flashSPI.transfer(CMD_READ_DATA);
-        flashSPI.transfer((mid >> 16) & 0xFF);
-        flashSPI.transfer((mid >> 8)  & 0xFF);
-        flashSPI.transfer( mid        & 0xFF);
+        flashSPI.transfer((addr >> 16) & 0xFF);
+        flashSPI.transfer((addr >> 8)  & 0xFF);
+        flashSPI.transfer( addr        & 0xFF);
         uint8_t b = flashSPI.transfer(0);
         digitalWrite(FLASH_CS, HIGH);
 
-        if (b == 0xFF) high = mid; else low = mid + RECORD_SIZE;
+        if (b == 0xFF) high = mid; else low = mid + 1;
     }
-    return low;
+    return recordIndexToAddr(low);
 }
 
 bool flashInit() {
