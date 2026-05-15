@@ -30,8 +30,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cache all assets; network-first for navigation (SPA routing)
-        navigateFallback: 'index.html',
+        navigateFallback: `${base}index.html`,
+        navigateFallbackAllowlist: [new RegExp(`^${base}`)],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
