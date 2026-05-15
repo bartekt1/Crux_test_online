@@ -34,7 +34,7 @@ jobs:
         run: cd pwa && npm ci
 
       - name: Build
-        run: cd pwa && npm run build -- --base=/Crux_test_online/
+        run: cd pwa && npm run build
 
       - name: SPA fallback (404 → index)
         run: cp pwa/dist/index.html pwa/dist/404.html
