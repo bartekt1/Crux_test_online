@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie'
-import type { Session, DbRecord } from '../types'
+import type { Session, DbRecord, Route, RouteLink } from '../types'
 
 class CruxDb extends Dexie {
   sessions!: Table<Session>
   records!: Table<DbRecord>
+  routes!: Table<Route>
 
   constructor() {
     super('cruxtracker')
@@ -11,10 +12,28 @@ class CruxDb extends Dexie {
       sessions: '++id, deviceSessionId, syncedAt',
       records: '++id, sessionId, state, attempt_id',
     })
-    // v2: added startTimestamp index (required for orderBy in getAllSessions)
     this.version(2).stores({
       sessions: '++id, deviceSessionId, syncedAt, startTimestamp',
       records: '++id, sessionId, state, attempt_id',
+    })
+    this.version(3).stores({
+      sessions: '++id, deviceSessionId, syncedAt, startTimestamp',
+      records: '++id, sessionId, state, attempt_id',
+      routes: '++id, createdAt, crag, region',
+    })
+    // v4: sessionIds[] → links: RouteLink[]; added ascentStyle
+    this.version(4).stores({
+      sessions: '++id, deviceSessionId, syncedAt, startTimestamp',
+      records: '++id, sessionId, state, attempt_id',
+      routes: '++id, createdAt, crag, region',
+    }).upgrade(async (tx) => {
+      await tx.table('routes').toCollection().modify((r: Record<string, unknown>) => {
+        if (Array.isArray(r['sessionIds'])) {
+          r['links'] = (r['sessionIds'] as number[]).map((id) => ({ sessionId: id }))
+          delete r['sessionIds']
+        }
+        if (!Array.isArray(r['links'])) r['links'] = []
+      })
     })
   }
 }
@@ -87,4 +106,33 @@ export async function clearAllLocalData(): Promise<void> {
     await db.sessions.clear()
     await db.records.clear()
   })
+}
+
+export async function getAllRoutes(): Promise<Route[]> {
+  return db.routes.orderBy('createdAt').reverse().toArray()
+}
+
+export async function getRouteById(id: number): Promise<Route | undefined> {
+  return db.routes.get(id)
+}
+
+export async function saveRoute(route: Omit<Route, 'id'>): Promise<number> {
+  return db.routes.add(route)
+}
+
+export async function updateRoute(id: number, changes: Partial<Route>): Promise<void> {
+  await db.routes.update(id, changes)
+}
+
+export async function deleteRoute(id: number): Promise<void> {
+  await db.routes.delete(id)
+}
+
+export async function getRouteForSession(sessionId: number): Promise<Route | undefined> {
+  const routes = await db.routes.toArray()
+  return routes.find((r) => r.links.some((l) => l.sessionId === sessionId))
+}
+
+export async function updateRouteLinks(id: number, links: RouteLink[]): Promise<void> {
+  await db.routes.update(id, { links })
 }

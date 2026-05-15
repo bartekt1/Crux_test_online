@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { BarChartIcon, ListIcon, ActivityIcon, BluetoothIcon, SettingsIcon } from './Icons'
+import { BarChartIcon, ListIcon, ActivityIcon, BookIcon, SettingsIcon } from './Icons'
 
 const tabs = [
-  { path: '/sessions',  label: 'Sesje',       Icon: ListIcon },
-  { path: '/stats',     label: 'Statystyki',  Icon: BarChartIcon },
-  { path: '/live',      label: 'Live',        Icon: ActivityIcon },
-  { path: '/device',    label: 'Urządzenie',  Icon: BluetoothIcon },
-  { path: '/settings',  label: 'Ustawienia',  Icon: SettingsIcon },
+  { path: '/sessions', label: 'Sesje',      Icon: ListIcon },
+  { path: '/stats',    label: 'Statystyki', Icon: BarChartIcon },
+  { path: '/journal',  label: 'Dziennik',   Icon: BookIcon },
+  { path: '/live',     label: 'Live',       Icon: ActivityIcon },
+  { path: '/settings', label: 'Ustawienia', Icon: SettingsIcon },
 ]
 
 export default function BottomNav() {

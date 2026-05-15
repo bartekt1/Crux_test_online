@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useThemeStore } from './stores/themeStore'
 import { useSessionStore } from './stores/sessionStore'
+import { useJournalStore } from './stores/journalStore'
 import { useBleStore } from './stores/bleStore'
 import { ble } from './services/bleService'
 import Header from './components/Header'
@@ -12,16 +13,19 @@ import WelcomeScreen from './screens/WelcomeScreen'
 import SessionsScreen from './screens/SessionsScreen'
 import SettingsScreen from './screens/SettingsScreen'
 
-// Lazy-load Recharts-heavy screens to reduce initial bundle
+// Lazy-load heavy screens to reduce initial bundle
 const SessionDetailScreen  = lazy(() => import('./screens/SessionDetailScreen'))
 const AttemptDetailScreen  = lazy(() => import('./screens/AttemptDetailScreen'))
 const LiveScreen           = lazy(() => import('./screens/LiveScreen'))
-const DeviceScreen         = lazy(() => import('./screens/DeviceScreen'))
 const StatsScreen          = lazy(() => import('./screens/StatsScreen'))
+const JournalScreen        = lazy(() => import('./screens/JournalScreen'))
+const JournalDetailScreen  = lazy(() => import('./screens/JournalDetailScreen'))
+const JournalEditScreen    = lazy(() => import('./screens/JournalEditScreen'))
 
 function AppContent() {
   const { theme } = useThemeStore()
   const { sessions, isLoading, load } = useSessionStore()
+  const { load: loadJournal } = useJournalStore()
   const { isConnected, sync } = useBleStore()
   const navigate = useNavigate()
   const location = useLocation()
@@ -32,7 +36,8 @@ function AppContent() {
 
   useEffect(() => {
     void load()
-  }, [load])
+    void loadJournal()
+  }, [load, loadJournal])
 
   useEffect(() => {
     if (isConnected) void sync(() => void load())
@@ -74,8 +79,12 @@ function AppContent() {
             <Route path="/stats" element={<StatsScreen />} />
             <Route path="/sessions/:id" element={<SessionDetailScreen />} />
             <Route path="/sessions/:id/attempts/:attemptId" element={<AttemptDetailScreen />} />
+            <Route path="/journal" element={<JournalScreen />} />
+            <Route path="/journal/new" element={<JournalEditScreen />} />
+            <Route path="/journal/:id" element={<JournalDetailScreen />} />
+            <Route path="/journal/:id/edit" element={<JournalEditScreen />} />
             <Route path="/live" element={<LiveScreen />} />
-            <Route path="/device" element={<DeviceScreen />} />
+            <Route path="/device" element={<Navigate to="/settings" replace />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -98,6 +98,41 @@ export interface LiveFrame {
   timestamp: number   // local Date.now()
 }
 
+export type GradeSystem = 'french' | 'uiaa' | 'kurtyka'
+
+export type AscentStyle = 'onsight' | 'flash' | 'redpoint' | 'pinkpoint' | 'toprope' | 'attempt'
+
+export const ASCENT_STYLE_LABEL: Record<AscentStyle, string> = {
+  onsight:    'Onsight',
+  flash:      'Flash',
+  redpoint:   'Redpoint',
+  pinkpoint:  'Pinkpoint',
+  toprope:    'Top rope',
+  attempt:    'Próba / Projekt',
+}
+
+export interface RouteLink {
+  sessionId: number   // Session.id (db key)
+  attemptId?: number  // attempt_id from records — undefined means whole session
+}
+
+export interface Route {
+  id?: number
+  createdAt: number
+  ascentDate?: number      // Date.now() ms — kiedy przeszedłeś drogę
+  region: string
+  crag: string
+  name: string
+  gradeSystem: GradeSystem
+  grade: string
+  ascentStyle?: AscentStyle
+  rating: number           // 1–5
+  notes: string
+  lat?: number
+  lng?: number
+  links: RouteLink[]
+}
+
 // JSON backup format
 export interface BackupFile {
   version: 1
