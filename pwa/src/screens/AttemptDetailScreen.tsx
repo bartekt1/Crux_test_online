@@ -60,9 +60,9 @@ export default function AttemptDetailScreen() {
         </div>
         <div className="flex-1 bg-gray-50 dark:bg-gray-800 rounded-2xl px-3 py-3">
           <p className="text-xl font-bold text-gray-900 dark:text-white">
-            {decode.speedMPerMin(attempt.maxDpRate * 100).toFixed(0)}
+            {attempt.avgSpeedMPerMin.toFixed(1)}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Max prędkość (m/min)</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Śr. prędkość (m/min)</p>
         </div>
       </div>
       <div className="px-4 flex gap-2">

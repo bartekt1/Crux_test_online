@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useThemeStore } from './stores/themeStore'
 import { useSessionStore } from './stores/sessionStore'
 import { useBleStore } from './stores/bleStore'
@@ -22,6 +22,8 @@ function AppContent() {
   const { theme } = useThemeStore()
   const { sessions, isLoading, load } = useSessionStore()
   const { isConnected, sync } = useBleStore()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -34,6 +36,13 @@ function AppContent() {
   useEffect(() => {
     if (isConnected) void sync(() => void load())
   }, [isConnected, sync, load])
+
+  // Po załadowaniu sesji na ekranie powitalnym → przejdź do listy sesji
+  useEffect(() => {
+    if (!isLoading && sessions.length > 0 && location.pathname === '/') {
+      navigate('/sessions', { replace: true })
+    }
+  }, [isLoading, sessions.length, location.pathname, navigate])
 
   // Sync reference to avoid stale closure in the callback
   const syncRef = useRef(sync)

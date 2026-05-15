@@ -143,12 +143,9 @@ export default function SessionDetailScreen() {
         <StatCard value={formatDuration(session.climbTimeS)} label="Wspinanie" accent />
         <StatCard value={formatDuration(session.restTimeS)} label="Odpoczynek" />
       </div>
-      {/* Debug info — timestamps & record count */}
-      <div className="px-4 text-xs text-gray-400 dark:text-gray-500 flex flex-col gap-0.5">
-        <span>Rekordów w bazie: {session.recordCount}</span>
-        <span>Start ts: {session.startTimestamp}</span>
-        <span>End ts: {session.endTimestamp}</span>
-        <span>Diff: {session.endTimestamp - session.startTimestamp}s</span>
+      <div className="px-4 flex gap-2">
+        <StatCard value={`${session.totalClimbMeters} m`} label="Metry w górę" accent />
+        <StatCard value={String(session.recordCount)} label="Pomiarów" />
       </div>
 
       {/* Altitude profile chart */}
@@ -202,7 +199,7 @@ export default function SessionDetailScreen() {
                   Próba #{attempt.attemptId}
                 </span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {formatDuration(attempt.durationS)} · max dP {attempt.maxDpRate.toFixed(1)} Pa/s
+                  {formatDuration(attempt.durationS)} · śr. {attempt.avgSpeedMPerMin.toFixed(1)} m/min
                 </span>
               </div>
               <span className="text-gray-400 dark:text-gray-500">›</span>

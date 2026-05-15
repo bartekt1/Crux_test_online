@@ -94,22 +94,23 @@ export function extractAttempts(records: LogRecord[]): Attempt[] {
     if (climbRecords.length === 0) continue
     climbRecords.sort((a, b) => a.timestamp_s - b.timestamp_s)
 
-    let maxDpRate = -Infinity
     let minPressRel = Infinity
 
     for (const rec of climbRecords) {
-      const dp = decode.dpRate(rec.dpRateX100)
-      if (dp > maxDpRate) maxDpRate = dp
       const pr = decode.pressRel(rec.pressRelX10)
       if (pr < minPressRel) minPressRel = pr
     }
+
+    const durationS = climbRecords[climbRecords.length - 1].timestamp_s - climbRecords[0].timestamp_s
+    const altitudeM = -minPressRel / 12
+    const avgSpeedMPerMin = durationS > 0 ? (altitudeM / durationS) * 60 : 0
 
     attempts.push({
       attemptId,
       startTimestamp: climbRecords[0].timestamp_s,
       endTimestamp: climbRecords[climbRecords.length - 1].timestamp_s,
-      durationS: climbRecords[climbRecords.length - 1].timestamp_s - climbRecords[0].timestamp_s,
-      maxDpRate,
+      durationS,
+      avgSpeedMPerMin,
       minPressRel,
       records: climbRecords,
     })

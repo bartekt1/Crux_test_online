@@ -61,8 +61,8 @@ export interface Attempt {
   startTimestamp: number
   endTimestamp: number
   durationS: number
-  maxDpRate: number    // Pa/s (decoded)
-  minPressRel: number  // Pa (decoded) — lowest point reached
+  avgSpeedMPerMin: number  // średnia prędkość = wysokość / czas × 60
+  minPressRel: number      // Pa (decoded) — najniższe ciśnienie = najwyższy punkt
   records: LogRecord[]
 }
 
