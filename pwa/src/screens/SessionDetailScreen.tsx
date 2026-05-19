@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip } from 'recharts'
 import { getSessionById, getRecordsForSession } from '../lib/db'
@@ -142,12 +142,14 @@ function RoutePickerModal({
 export default function SessionDetailScreen() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { deleteSession } = useSessionStore()
+  const { deleteSession, updateNotes } = useSessionStore()
   const { routes, addLink } = useJournalStore()
   const [session, setSession] = useState<Session | null>(null)
   const [processed, setProcessed] = useState<ProcessedSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [showRoutePicker, setShowRoutePicker] = useState(false)
+  const [notes, setNotes] = useState('')
+  const notesSaved = useRef(true)
 
   useEffect(() => {
     if (!id) return
@@ -157,6 +159,7 @@ export default function SessionDetailScreen() {
       if (!s) { navigate('/sessions', { replace: true }); return }
       const records = await getRecordsForSession(dbId)
       setSession(s)
+      setNotes(s.notes ?? '')
       setProcessed(buildProcessedSession(s, records))
       setLoading(false)
     })()
@@ -273,6 +276,31 @@ export default function SessionDetailScreen() {
           ))}
         </div>
       )}
+
+      {/* Notes */}
+      <div className="px-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Notatki</h3>
+          {!notesSaved.current && (
+            <span className="text-xs text-gray-400 dark:text-gray-500">niezapisane…</span>
+          )}
+        </div>
+        <textarea
+          value={notes}
+          onChange={(e) => { setNotes(e.target.value); notesSaved.current = false }}
+          onBlur={async () => {
+            if (!notesSaved.current) {
+              await updateNotes(session.id!, notes)
+              notesSaved.current = true
+            }
+          }}
+          rows={3}
+          placeholder="Co robiłeś na tej sesji? (zapisywane automatycznie po opuszczeniu pola)"
+          className="w-full bg-gray-50 dark:bg-gray-800 rounded-2xl px-4 py-3 text-sm
+            text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500
+            outline-none resize-none focus:ring-2 focus:ring-violet-500 transition-shadow"
+        />
+      </div>
 
       {/* Linked route */}
       {(() => {

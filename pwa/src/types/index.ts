@@ -53,6 +53,7 @@ export interface Session {
   restTimeS: number
   recordCount: number
   totalClimbMeters: number
+  notes?: string           // opcjonalna notatka użytkownika
 }
 
 // Per-attempt stats (computed on demand, not stored)

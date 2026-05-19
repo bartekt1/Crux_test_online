@@ -83,6 +83,10 @@ export async function getRecordsForSession(sessionId: number): Promise<DbRecord[
   return db.records.where('sessionId').equals(sessionId).sortBy('timestamp_s')
 }
 
+export async function updateSessionNotes(sessionDbId: number, notes: string): Promise<void> {
+  await db.sessions.update(sessionDbId, { notes })
+}
+
 export async function deleteSession(sessionDbId: number): Promise<void> {
   await db.transaction('rw', db.sessions, db.records, async () => {
     await db.records.where('sessionId').equals(sessionDbId).delete()

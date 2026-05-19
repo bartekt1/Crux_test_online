@@ -38,6 +38,18 @@ static const unsigned long czas_blokady = 500;  // zwiększone z 300ms → mniej
 // Flaga resetu stanu sesji — ustawiana przez startSession(), czytana w pętli
 static bool sessionJustStarted = false;
 
+// Zmienne maszyny stanów wyciągnięte z loop() na poziom pliku,
+// aby startSession() mogło je resetować przy każdej nowej sesji.
+static State   smPendingState    = IDLE;
+static int     smConfirmCounter  = 0;
+static uint8_t smFreefallCounter = 0;
+
+// Retrospektywna ocena ruchu: śledzi max Gv podczas bieżącej fazy CLIMBING.
+// Przy wyjściu z CLIMBING sprawdzamy, czy ruch był wystarczający — jeśli nie,
+// cofamy inkrementację licznika prób (fałszywy sygnał ciśnieniowy bez ruchu).
+static float   smClimbMaxGv      = 0.0f;
+static bool    smClimbWasCounted = false;
+
 // Funkcja usypiania
 void enterDeepSleep() {
     displaySleep();
@@ -58,7 +70,13 @@ void startSession() {
     prefs.putUInt("last_sess_id", sysSessionId);
     prefs.end();
 
-    sysAttemptCount = 0;
+    sysAttemptCount   = 0;
+    sysCurrentState   = IDLE;
+    smPendingState    = IDLE;
+    smConfirmCounter  = 0;
+    smFreefallCounter = 0;
+    smClimbMaxGv      = 0.0f;
+    smClimbWasCounted = false;
     sysPressureInitialized = false;
     sysSessionStartAddr = flashWriteAddr;
     sessionJustStarted = true;  // zresetuj timery logowania w pętli głównej
@@ -166,13 +184,26 @@ void handleBleCommands() {
         bleSend("FORMAT:START");
         flashChipErase();
 
-        Preferences prefs;
-        prefs.begin("crux_nvs", false);
-        prefs.putUInt("last_sess_id", 0);
-        prefs.end();
+        // Resetuj licznik sesji
+        {
+            Preferences prefs;
+            prefs.begin("crux_nvs", false);
+            prefs.putUInt("last_sess_id", 0);
+            prefs.end();
+        }
         sysSessionId = 0;
         sysAttemptCount = 0;
-        Serial.println("[FORMAT] Flash + NVS wyczyszczone. Nastepna sesja bedzie id=1");
+
+        // Wyczyść konfigurację — przy kolejnym uruchomieniu loadConfig() użyje wartości
+        // wbudowanych w firmware (domyślne po kalibracji na danych z testów).
+        {
+            Preferences cfgPrefs;
+            cfgPrefs.begin("crux_cfg", false);
+            cfgPrefs.clear();
+            cfgPrefs.end();
+        }
+        loadConfig();
+        Serial.println("[FORMAT] Flash + NVS + konfiguracja wyczyszczone. Nastepna sesja bedzie id=1");
 
         bleSend("FORMAT_OK");
     }
@@ -362,9 +393,11 @@ void loop() {
         
         if (sysMeasuring && sysPressureInitialized) {
             State targetState = sysCurrentState;
-            static State pendingState = IDLE;
-            static int confirmCounter = 0;
-            static uint8_t freefallCounter = 0;
+
+            // Aktualizuj max Gv podczas trwania fazy CLIMBING (retrospektywna ocena ruchu)
+            if (sysCurrentState == CLIMBING && sysGVariance > smClimbMaxGv) {
+                smClimbMaxGv = sysGVariance;
+            }
 
             bool active  = sysGVariance > cfg.gAct;
             bool still   = sysGVariance < cfg.gStill;
@@ -372,34 +405,54 @@ void loop() {
             bool goingDn = sysKalmanRate >  cfg.pDesc;
 
             if (sysTotalG < cfg.gFall) {
-                // Wydłużono debounce do 5 próbek
-                if (++freefallCounter >= 5) {
-                    freefallCounter = 0;
-                    sysCurrentState = FREEFALL;
-                    confirmCounter  = 0;
+                if (++smFreefallCounter >= 5) {
+                    smFreefallCounter = 0;
+                    sysCurrentState   = FREEFALL;
+                    smConfirmCounter  = 0;
                 }
             } else {
-                freefallCounter = 0;
+                smFreefallCounter = 0;
                 if      (goingUp && active) targetState = CLIMBING;
-                else if (goingDn && active) targetState = DESCENDING;
+                else if (goingDn)           targetState = DESCENDING;  // bez active: Gv przy zjeździe jest zbyt niskie by wymagać active=0.030
                 else if (still)             targetState = RESTING;
 
                 if (targetState != sysCurrentState) {
-                    if (targetState == pendingState) {
-                        if (++confirmCounter >= cfg.confirm) {
-                            if (sysCurrentState != CLIMBING && targetState == CLIMBING) {
-                                sysAttemptCount++;
+                    if (targetState == smPendingState) {
+                        if (++smConfirmCounter >= cfg.confirm) {
+
+                            // Wyjście z CLIMBING: retrospektywna ocena ruchu.
+                            // Jeśli przez całą fazę CLIMBING max Gv był poniżej progu aktywności,
+                            // to był to sygnał ciśnieniowy bez rzeczywistego ruchu (np. HVAC,
+                            // wiatr) — cofamy inkrementację licznika prób.
+                            if (sysCurrentState == CLIMBING && targetState != CLIMBING) {
+                                if (smClimbWasCounted && smClimbMaxGv < cfg.gAct) {
+                                    sysAttemptCount--;
+                                }
+                                smClimbMaxGv      = 0.0f;
+                                smClimbWasCounted = false;
                             }
-                            sysCurrentState = targetState;
-                            confirmCounter  = 0;
+
+                            // Wejście w CLIMBING: nowa próba tylko przy ziemi (≤ ~0.5 m nad bazą).
+                            if (sysCurrentState != CLIMBING && targetState == CLIMBING) {
+                                smClimbMaxGv      = 0.0f;
+                                smClimbWasCounted = false;
+                                float pressRel = filterKalman.getPressure() - sysSessionBasePressure;
+                                if (pressRel > -6.0f) {
+                                    sysAttemptCount++;
+                                    smClimbWasCounted = true;
+                                }
+                            }
+
+                            sysCurrentState  = targetState;
+                            smConfirmCounter = 0;
                         }
                     } else {
-                        pendingState = targetState;
-                        confirmCounter = 1;
+                        smPendingState   = targetState;
+                        smConfirmCounter = 1;
                     }
                 } else {
-                    confirmCounter = 0;
-                    pendingState = sysCurrentState;
+                    smConfirmCounter = 0;
+                    smPendingState   = sysCurrentState;
                 }
             }
 
@@ -412,9 +465,9 @@ void loop() {
                 sessionJustStarted = false;
                 lastFlashLog = 0;
                 lastLoggedState = (State)255;  // wymusza stateChanged = true
-                pendingState   = IDLE;
-                confirmCounter = 0;
-                freefallCounter = 0;
+                smPendingState    = IDLE;
+                smConfirmCounter  = 0;
+                smFreefallCounter = 0;
                 Serial.printf(">>> SESSION RESET done, flashWriteAddr=0x%x\n", flashWriteAddr);
             }
 

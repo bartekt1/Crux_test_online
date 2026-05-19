@@ -149,7 +149,7 @@ State chars used in both live telemetry and dump records: `I`=IDLE, `R`=RESTING,
 |-----------|---------|---------|
 | `pClimb`  | 5.0     | Min |dP| (Pa/s) to enter CLIMBING (upward) |
 | `pDesc`   | 1.5     | Min dP (Pa/s) to enter DESCENDING |
-| `gAct`    | 0.003   | G-variance threshold to consider body "active" |
+| `gAct`    | 0.030   | G-variance threshold to consider body "active" (above rest noise 0.001–0.005 and HVAC drift max 0.026) |
 | `gStill`  | 0.001   | G-variance threshold to consider body "still" → RESTING |
 | `gFall`   | 0.3     | Total-G threshold below which FREEFALL is detected |
 | `confirm` | 4       | State transition debounce (number of 100 ms ticks) |

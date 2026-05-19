@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getAllSessions, deleteSession as dbDeleteSession, deleteSessions as dbDeleteSessions, clearAllLocalData } from '../lib/db'
+import { getAllSessions, deleteSession as dbDeleteSession, deleteSessions as dbDeleteSessions, clearAllLocalData, updateSessionNotes as dbUpdateNotes } from '../lib/db'
 import type { Session } from '../types'
 
 interface SessionStore {
@@ -9,6 +9,7 @@ interface SessionStore {
   deleteSession: (dbId: number) => Promise<void>
   deleteSessions: (dbIds: number[]) => Promise<void>
   clearAll: () => Promise<void>
+  updateNotes: (dbId: number, notes: string) => Promise<void>
 }
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -39,5 +40,12 @@ export const useSessionStore = create<SessionStore>((set) => ({
   clearAll: async () => {
     await clearAllLocalData()
     set({ sessions: [] })
+  },
+
+  updateNotes: async (dbId, notes) => {
+    await dbUpdateNotes(dbId, notes)
+    set((state) => ({
+      sessions: state.sessions.map((s) => s.id === dbId ? { ...s, notes } : s),
+    }))
   },
 }))
