@@ -8,24 +8,32 @@ function intervalAfter(records: LogRecord[], i: number): number {
   return Math.min(records[i + 1].timestamp_s - records[i].timestamp_s, 5)
 }
 
-// Total meters climbed = sum of height gains across all climbing bouts.
-// Uses min pressRel per bout (most negative = highest point reached).
+// Total meters climbed = sum of HEIGHT GAINED across all climbing bouts.
+// Each bout contributes (pressRel_at_start - pressRel_at_peak) — i.e. the
+// actual ascent during that segment, not the absolute altitude.
+// Without this, mid-route pauses (separate attempt_ids) cause double-counting:
+// each resumed segment would add its full altitude from the session base.
 function computeTotalClimbMeters(records: LogRecord[]): number {
   let total = 0
-  let minPressRel = 0
   let inClimb = false
+  let boutStart = 0  // pressRel at the beginning of the current climbing bout
+  let boutMin   = 0  // most negative pressRel seen during the bout (highest point)
 
   for (const rec of records) {
     const pr = rec.pressRelX10 / 10  // Pa
     if (rec.state === State.CLIMBING) {
-      if (!inClimb) { minPressRel = pr; inClimb = true }
-      else if (pr < minPressRel) minPressRel = pr
+      if (!inClimb) { boutStart = pr; boutMin = pr; inClimb = true }
+      else if (pr < boutMin) boutMin = pr
     } else if (inClimb) {
-      total += Math.abs(minPressRel)
+      const gain = boutStart - boutMin  // positive when climber went up
+      if (gain > 0) total += gain
       inClimb = false
     }
   }
-  if (inClimb) total += Math.abs(minPressRel)
+  if (inClimb) {
+    const gain = boutStart - boutMin
+    if (gain > 0) total += gain
+  }
 
   return Math.round(total / 12)  // Pa ÷ 12 Pa/m ≈ meters
 }
