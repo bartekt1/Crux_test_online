@@ -6,7 +6,12 @@
       "Bash(pip show *)",
       "Bash(pip install *)",
       "Bash(pio run *)",
-      "Bash(grep -E '\\\\.\\(cpp|h\\)$')"
+      "Bash(grep -E '\\\\.\\(cpp|h\\)$')",
+      "Bash(~/.platformio/penv/bin/pio run *)",
+      "PowerShell(\\(Get-Command pio -ErrorAction SilentlyContinue\\).Source; Get-ChildItem \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" -ErrorAction SilentlyContinue)",
+      "PowerShell(cd \"c:\\\\Crux online test\\\\Crux_test_online\\\\firmware\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e lolin_c3_mini 2>&1 | Select-Object -Last 15)",
+      "PowerShell(cd \"c:\\\\Crux online test\\\\Crux_test_online\\\\firmware\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e lolin_c3_mini 2>&1 | Select-Object -Last 8)",
+      "Bash(git push *)"
     ]
   }
 }
