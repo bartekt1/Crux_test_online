@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { Session, DbRecord, Route, RouteLink } from '../types'
+import { computeMacroStats } from './sessionProcessor'
 
 class CruxDb extends Dexie {
   sessions!: Table<Session>
@@ -101,6 +102,30 @@ export async function deleteSessions(sessionDbIds: number[]): Promise<void> {
       await db.sessions.delete(id)
     }
   })
+}
+
+// Jednorazowa migracja: przelicza totalClimbMeters i attemptCount dla wszystkich
+// istniejących sesji po poprawie algorytmów (maj 2026).
+// Uruchamia się raz — wersja śledzona w localStorage ('crux_stats_v').
+const STATS_MIGRATION_VERSION = '2'
+
+export async function migrateStatsIfNeeded(): Promise<void> {
+  if (localStorage.getItem('crux_stats_v') === STATS_MIGRATION_VERSION) return
+
+  const sessions = await db.sessions.filter((s) => s.durationS > 0).toArray()
+  for (const session of sessions) {
+    if (!session.id) continue
+    const records = await db.records
+      .where('sessionId').equals(session.id).sortBy('timestamp_s')
+    if (records.length === 0) continue
+    const stats = computeMacroStats(records, session.deviceSessionId)
+    await db.sessions.update(session.id, {
+      totalClimbMeters: stats.totalClimbMeters,
+      attemptCount:     stats.attemptCount,
+    })
+  }
+
+  localStorage.setItem('crux_stats_v', STATS_MIGRATION_VERSION)
 }
 
 // Wipe all local session data — call after FORMAT so the local cache

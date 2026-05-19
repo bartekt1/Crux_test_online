@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getAllSessions, deleteSession as dbDeleteSession, deleteSessions as dbDeleteSessions, clearAllLocalData, updateSessionNotes as dbUpdateNotes } from '../lib/db'
+import { getAllSessions, deleteSession as dbDeleteSession, deleteSessions as dbDeleteSessions, clearAllLocalData, updateSessionNotes as dbUpdateNotes, migrateStatsIfNeeded } from '../lib/db'
 import type { Session } from '../types'
 
 interface SessionStore {
@@ -19,6 +19,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
   load: async () => {
     set({ isLoading: true })
     try {
+      await migrateStatsIfNeeded()
       const sessions = await getAllSessions()
       set({ sessions })
     } finally {
